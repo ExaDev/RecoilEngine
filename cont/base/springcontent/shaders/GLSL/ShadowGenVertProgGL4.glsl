@@ -100,6 +100,7 @@ out Data {
 };
 out float gl_ClipDistance[2];
 
+#if 0
 void TransformShadowCam(vec4 worldPos, vec3 worldNormal) {
 	vec4 lightVertexPos = shadowView * worldPos;
 	vec3 lightVertexNormal = normalize(mat3(shadowView) * worldNormal);
@@ -115,6 +116,12 @@ void TransformShadowCam(vec4 worldPos, vec3 worldNormal) {
 
 	gl_Position = shadowProj * lightVertexPos;
 }
+#else
+void TransformShadowCam(vec4 worldPos, vec3 worldNormal) {
+	// possibly a placeholder
+	gl_Position = shadowViewProj * worldPos;
+}
+#endif
 
 #line 1119
 

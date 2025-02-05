@@ -131,7 +131,7 @@ char* FileConfigSource::Strip(char* begin, char* end) {
 }
 
 /**
- * @brief Rewind file and re-read it.
+ * @brief Sanitize file and re-read it.
  */
 void FileConfigSource::Read(FILE* file)
 {
