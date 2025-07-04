@@ -519,6 +519,63 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 			Skinning::ReparentMeshesTrianglesToBones(&model, allSkinnedMeshes);
 	}
 
+	// load all animations
+	for (const auto& animation : asset.animations) {
+		auto animIt = model.animationMap.GetNamedAnimationIterator(std::string(animation.name));
+		for (const auto& channel : animation.channels) {
+			if (!channel.nodeIndex.has_value())
+				continue;
+
+			const auto pieceIdxIt = nodeIdxToPieceIdx.find(channel.nodeIndex.value());
+
+			if (pieceIdxIt == nodeIdxToPieceIdx.end())
+				continue;
+
+			const auto& samplers = animation.samplers[channel.samplerIndex];
+
+			// skip cubic splines if any for now
+			if (samplers.interpolation == fastgltf::AnimationInterpolation::CubicSpline)
+				continue;
+
+			const auto& inputAccessor = asset.accessors[samplers.inputAccessor];
+			const auto& outputAccessor = asset.accessors[samplers.outputAccessor];
+
+			switch (channel.path)
+			{
+			case fastgltf::AnimationPath::Translation: {
+				auto& animVectors = model.animationMap.GetPieceAnimationVectors<float3>(animIt, pieceIdxIt->second);
+				fastgltf::iterateAccessorWithIndex<float>(asset, inputAccessor, [&](const auto& val, std::size_t idx) {
+					animVectors.timeFrames.emplace_back(val);
+				});
+				fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(asset, outputAccessor, [&](const auto& val, std::size_t idx) {
+					animVectors.values.emplace_back(val.x(), val.y(), val.z());
+				});
+			} break;
+			case fastgltf::AnimationPath::Rotation: {
+				auto& animVectors = model.animationMap.GetPieceAnimationVectors<CQuaternion>(animIt, pieceIdxIt->second);
+				fastgltf::iterateAccessorWithIndex<float>(asset, inputAccessor, [&](const auto& val, std::size_t idx) {
+					animVectors.timeFrames.emplace_back(val);
+				});
+				fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(asset, outputAccessor, [&](const auto& val, std::size_t idx) {
+					animVectors.values.emplace_back(val.x(), val.y(), val.z(), val.w());
+				});
+			} break;
+			case fastgltf::AnimationPath::Scale: {
+				auto& animVectors = model.animationMap.GetPieceAnimationVectors<float>(animIt, pieceIdxIt->second);
+				fastgltf::iterateAccessorWithIndex<float>(asset, inputAccessor, [&](const auto& val, std::size_t idx) {
+					animVectors.timeFrames.emplace_back(val);
+				});
+				fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec3>(asset, outputAccessor, [&](const auto& val, std::size_t idx) {
+					animVectors.values.emplace_back(val.x());
+				});
+			} break;
+			default:
+				break;
+			}
+		}
+	}
+	model.animationMap.RemoveEmptyAnimations();
+
 	// will also calculate pieces / model bounding box
 	ModelUtils::ApplyModelProperties(&model, optionalModelParams);
 
