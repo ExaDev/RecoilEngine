@@ -883,6 +883,24 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 		 globalRendering->supportClipSpaceControl
 	);
 
+	// doesn't seem to do much if anything effectively
+	#if 0
+	{
+		// Texel snapping to prevent shadow shimmering
+		const float texelScale = shadowMapSize * 0.5f;
+		const float invTexelScale = 2.0f / shadowMapSize;
+
+		CMatrix44f shadowMatrix = projMatrix * viewMatrix;
+		float4 shadowOrigin = shadowMatrix.col[3];
+
+		float offsetX = (std::roundf(shadowOrigin.x * texelScale) - shadowOrigin.x * texelScale) * invTexelScale;
+		float offsetY = (std::roundf(shadowOrigin.y * texelScale) - shadowOrigin.y * texelScale) * invTexelScale;
+
+		projMatrix.col[3][0] += offsetX;
+		projMatrix.col[3][1] += offsetY;
+	}
+	#endif
+
 	viewProjMatrix = projMatrix * viewMatrix;
 }
 
