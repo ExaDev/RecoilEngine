@@ -1,6 +1,7 @@
 #include "Polygon.hpp"
 
 #include <numeric>
+#include <cmath>
 
 #include "System/SpringMath.h"
 #include "System/AABB.hpp"
@@ -263,7 +264,7 @@ bool Geometry::Face::Sanitize()
 #else
 		// pseudoangle as per
 		// https://stackoverflow.com/questions/16542042/fastest-way-to-sort-vectors-by-angle-without-actually-computing-that-angle
-		points[i].w = std::copysignf(1.0f - dot / (std::fabsf(dot) + std::fabsf(det)), det);
+		points[i].w = std::copysignf(1.0f - dot / (math::fabsf(dot) + math::fabsf(det)), det);
 #endif
 	}
 
