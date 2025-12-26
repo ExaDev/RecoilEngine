@@ -693,7 +693,7 @@ void CShadowHandler::DrawShadowPasses()
 	auto state = GL::SubState(
 		Blending(GL_FALSE),
 		Lighting(GL_FALSE),
-		Texture2D(GL_FALSE),
+		TexTarget<GL_TEXTURE_2D>(GL_FALSE),
 		ShadeModel(GL_FLAT),
 		DepthMask(GL_TRUE),
 		DepthTest(GL_TRUE),
