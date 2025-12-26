@@ -250,15 +250,21 @@ bool Geometry::Face::Sanitize()
 	const auto midPoint = std::reduce(points.begin(), points.end()) / points.size();
 
 	const auto& normal = GetPlane();
-	const auto ref = static_cast<float3>(*points.begin() - midPoint);
+	const auto ref = float3{ (*points.begin() - midPoint).xyz };
 
 	// use point.w to store the angle
 	for (size_t i = 0; i < points.size(); ++i) {
-		const auto vec = static_cast<float3>(points[i]) - midPoint;
+		const auto vec = float3{ (points[i] - midPoint).xyz };
 
 		const auto det = normal.dot(ref.cross(vec));
 		const auto dot = ref.dot(vec);
+#if 0
 		points[i].w = math::atan2f(det, dot);
+#else
+		// pseudoangle as per
+		// https://stackoverflow.com/questions/16542042/fastest-way-to-sort-vectors-by-angle-without-actually-computing-that-angle
+		points[i].w = std::copysignf(1.0f - dot / (std::fabsf(dot) + std::fabsf(det)), det);
+#endif
 	}
 
 	static const auto SortPred = [](const auto& lhs, const auto& rhs) {
