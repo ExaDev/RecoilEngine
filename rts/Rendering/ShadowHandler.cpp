@@ -214,9 +214,9 @@ void CShadowHandler::DrawFrustumDebugMap() const
 
 	static constexpr SColor SHADOW_CAM_COL = SColor{ 255,   0,   0, 255 };
 	static constexpr SColor WORLD_BNDS_COL = SColor{   0,   0, 255, 255 };
-	static constexpr SColor PLAYER_CAM_COL = SColor{ 255, 255, 255, 255 };
+	static constexpr SColor WORLD_PCAM_COL = SColor{ 255, 255, 255, 255 };
 	static constexpr SColor CLIPPD_CAM_COL = SColor{   0, 255,   0, 255 };
-	static constexpr SColor CSHADC_CAM_COL = SColor{   0, 255, 255, 255 };
+	static constexpr SColor WORLD_SCUB_COL = SColor{   0, 255, 255, 255 };
 
 	CCamera* shadCam = CCameraHandler::GetCamera(CCamera::CAMTYPE_SHADOW);
 	{
@@ -300,15 +300,15 @@ void CShadowHandler::DrawFrustumDebugMap() const
 
 	// player's camera frustum
 	{
-		const auto ntl = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_NTL], PLAYER_CAM_COL };
-		const auto ntr = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_NTR], PLAYER_CAM_COL };
-		const auto nbr = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_NBR], PLAYER_CAM_COL };
-		const auto nbl = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_NBL], PLAYER_CAM_COL };
+		const auto ntl = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_NTL], WORLD_PCAM_COL };
+		const auto ntr = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_NTR], WORLD_PCAM_COL };
+		const auto nbr = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_NBR], WORLD_PCAM_COL };
+		const auto nbl = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_NBL], WORLD_PCAM_COL };
 
-		const auto ftl = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_FTL], PLAYER_CAM_COL };
-		const auto ftr = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_FTR], PLAYER_CAM_COL };
-		const auto fbr = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_FBR], PLAYER_CAM_COL };
-		const auto fbl = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_FBL], PLAYER_CAM_COL };
+		const auto ftl = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_FTL], WORLD_PCAM_COL };
+		const auto ftr = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_FTR], WORLD_PCAM_COL };
+		const auto fbr = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_FBR], WORLD_PCAM_COL };
+		const auto fbl = VA_TYPE_C{ playCamFrustum[CCamera::FRUSTUM_POINT_FBL], WORLD_PCAM_COL };
 
 		rb.AddVertices({ nbl, nbr }); // NBL - NBR
 		rb.AddVertices({ nbr, ntr }); // NBR - NTR
@@ -331,13 +331,13 @@ void CShadowHandler::DrawFrustumDebugMap() const
 		sh.Disable();
 	}
 
-	// clipped world cube
+	// clipped world cube by the player's camera
 	{
 		size_t frstIdx = 0;
-		for (size_t currIdx = 0; currIdx < clippedWorldCube.size() - 1; /*NOOP*/) {
+		for (size_t currIdx = 0; currIdx < wcClippedByCamera.size() - 1; /*NOOP*/) {
 			size_t nextIdx = (currIdx + 1);
-			rb.AddVertices({ { clippedWorldCube[currIdx], CLIPPD_CAM_COL}, { clippedWorldCube[nextIdx], CLIPPD_CAM_COL} });
-			if (clippedWorldCube[frstIdx] == clippedWorldCube[nextIdx]) {
+			rb.AddVertices({ { wcClippedByCamera[currIdx], CLIPPD_CAM_COL}, { wcClippedByCamera[nextIdx], CLIPPD_CAM_COL} });
+			if (wcClippedByCamera[frstIdx] == wcClippedByCamera[nextIdx]) {
 				currIdx += 2; // skip one
 				frstIdx = currIdx;
 			} else {
@@ -351,13 +351,13 @@ void CShadowHandler::DrawFrustumDebugMap() const
 		sh.Disable();
 	}
 
-	// clipped extended shadow cube
+	// clipped world cube by the extended shadow cuboid
 	{
 		size_t frstIdx = 0;
-		for (size_t currIdx = 0; currIdx < clippedShadowCube.size() - 1; /*NOOP*/) {
+		for (size_t currIdx = 0; currIdx < wcClippedByShCube.size() - 1; /*NOOP*/) {
 			size_t nextIdx = (currIdx + 1);
-			rb.AddVertices({ { clippedShadowCube[currIdx], CSHADC_CAM_COL}, { clippedShadowCube[nextIdx], CSHADC_CAM_COL} });
-			if (clippedShadowCube[frstIdx] == clippedShadowCube[nextIdx]) {
+			rb.AddVertices({ { wcClippedByShCube[currIdx], WORLD_SCUB_COL}, { wcClippedByShCube[nextIdx], WORLD_SCUB_COL} });
+			if (wcClippedByShCube[frstIdx] == wcClippedByShCube[nextIdx]) {
 				currIdx += 2; // skip one
 				frstIdx = currIdx;
 			}
@@ -810,13 +810,18 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_NEA));
 		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_FAR));
 
-		Geometry::Polygon clipperWorldCubePolygon = worldCube.ClipBy(cameraFrustum);
-		clippedWorldCube = clipperWorldCubePolygon.GetAllLines();
+		// Clip world bounds to visible frustum to optimize shadow map coverage
+		// Only render shadows for geometry that's actually visible to the player
+		Geometry::Polygon wcClippedByCameraPoly = worldCube.ClipBy(cameraFrustum);
+
+		// Save it explicitly as it's a part of debug output
+		wcClippedByCamera = wcClippedByCameraPoly.GetAllLines();
 	}
 
 	// construct Camera World Matrix & View Matrix
 	CMatrix44f viewMatrixInv;
 	{
+		// Build orthogonal basis aligned with light direction (zAxis)
 		float3 zAxis = float3{ ISky::GetSky()->GetLight()->GetLightDir().xyz };
 		float3 xAxis = Impl::GetLightXDir(playerCam, zAxis);
 		float3 yAxis = zAxis.cross(xAxis);
@@ -827,27 +832,37 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 
 		// convert camera "world" matrix into camera view matrix
 		// https://www.3dgep.com/understanding-the-view-matrix/
+		// note viewMatrixInv has default (0,0,0) position here, it's defined later
 		viewMatrix = viewMatrixInv.InvertAffine();
 	}
 
 	lightAABB.Reset();
 
-	for (const auto& p : clippedWorldCube) {
+	for (const auto& p : wcClippedByCamera) {
 		lightAABB.AddPoint(viewMatrix * p);
 	}
 
 	float3 lsMidPos = lightAABB.CalcCenter();
 	float3 lsDims = lightAABB.CalcScales();
 
+	// Position shadow camera at the far end of the bounding box, looking toward the scene
 	viewMatrix.SetPos(-(lsMidPos + float3{ 0.0f, 0.0f, lsDims.z }));
 	viewMatrixInv.Translate(-viewMatrix.GetPos());
 
+	// Adjust AABB to account for new camera position
 	lightAABB.mins += viewMatrix.GetPos();
 	lightAABB.maxs += viewMatrix.GetPos();
 
-	// this is required when shadow camera position is roughly behind the player's camera
+	// wcClippedByCamera/wcClippedByCameraPoly calculated above is worldCube clipped by cameraFrustum
+	// respectively if the camera is e.g. inside the worldcube the clipped volume will become the camera frustum
+	// clipped on the edges of the world, respectively this doesn't guarantee all the remaining world volume
+	// in the direction towards the light source is fit into that tight volume
+	// another case when it is required is when shadow camera position is roughly behind the player's camera
 	// in such cases without adjustment objects behind the near plane of the player's camera
 	// won't be included into the shadow cuboid bounds
+	//
+	// thus, the next step is to clip the worldCube by the near-far extended lightAABB and then transform it to the light space AABB
+	// since l,r,t,b bounds are already defined we only care about the extra height of the light cuboid / AABB (extraCamHeight)
 	float extraCamHeight = 0.0f;
 	{
 		AABB lightAABBExt = lightAABB;
@@ -860,22 +875,24 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 		unclippedShadowCubePoly.MakeFrom(lightAABBExt, viewMatrixInv);
 		unclippedShadowCubePoly.FlipFacesDirection(); // figure out why it's needed
 
-		Geometry::Polygon clippedShadowCubePoly = worldCube.ClipBy(unclippedShadowCubePoly);
-		clippedShadowCube = clippedShadowCubePoly.GetAllLines();
+		Geometry::Polygon wcClippedByShCubePoly = worldCube.ClipBy(unclippedShadowCubePoly);
+		wcClippedByShCube = wcClippedByShCubePoly.GetAllLines();
 
 		// reuse lightAABBExt variable
-		lightAABBExt = clippedShadowCubePoly.GetAABB(viewMatrix);
+		lightAABBExt = wcClippedByShCubePoly.GetAABB(viewMatrix);
 		extraCamHeight = std::max(extraCamHeight, lightAABBExt.maxs.z);
 	}
 
 	// shift camera further away to account for the calculation above
 	viewMatrix.col[3].z -= extraCamHeight;
+	// viewMatrixInv is local and no longer needed, so we don't care to update it with the change above
 
 	// translate mins.z accordingly
 	lightAABB.mins.z -= extraCamHeight;
 	// Make sure maxs.z is at the camera position
 	lightAABB.maxs.z = 0.0f; // @ camPos
 
+	// Negated Z values because OpenGL convention has camera looking down -Z axis
 	projMatrix = CMatrix44f::ClipOrthoProj(
 		 lightAABB.mins.x,  lightAABB.maxs.x,
 		 lightAABB.mins.y,  lightAABB.maxs.y,

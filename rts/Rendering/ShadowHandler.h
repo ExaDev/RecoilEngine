@@ -113,8 +113,8 @@ private:
 	inline static bool firstInit = true;
 	inline static bool shadowsSupported = false;
 
-	std::vector<float3> clippedWorldCube;
-	std::vector<float3> clippedShadowCube;
+	std::vector<float3> wcClippedByCamera;
+	std::vector<float3> wcClippedByShCube;
 	std::array<float3, 8> playCamFrustum;
 
 	// these project geometry into light-space
