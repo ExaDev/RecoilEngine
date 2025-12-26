@@ -115,6 +115,7 @@ private:
 
 	std::vector<float3> wcClippedByCamera;
 	std::vector<float3> wcClippedByShCube;
+	float extraShadowCamHeight;
 	std::array<float3, 8> playCamFrustum;
 
 	// these project geometry into light-space

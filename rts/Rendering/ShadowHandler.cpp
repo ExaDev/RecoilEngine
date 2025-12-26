@@ -212,7 +212,8 @@ void CShadowHandler::DrawFrustumDebugMap() const
 	if (!debugFrustum || !shadowsLoaded || !freezeFrustum)
 		return;
 
-	static constexpr SColor SHADOW_CAM_COL = SColor{ 255,   0,   0, 255 };
+	static constexpr SColor SHVOL_BEG_COL  = SColor{ 255, 255,   0, 255 };
+	static constexpr SColor SHVOL_FIN_COL  = SColor{ 255,   0,   0, 255 };
 	static constexpr SColor WORLD_BNDS_COL = SColor{   0,   0, 255, 255 };
 	static constexpr SColor WORLD_PCAM_COL = SColor{ 255, 255, 255, 255 };
 	static constexpr SColor CLIPPD_CAM_COL = SColor{   0, 255,   0, 255 };
@@ -229,17 +230,17 @@ void CShadowHandler::DrawFrustumDebugMap() const
 	rb.AssertSubmission();
 	auto& sh = rb.GetShader();
 
-	// shadow frustum
+	// shadow cuboid unextended (yellow) and final (red)
 	{
-		const auto ntl = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NTL), SHADOW_CAM_COL };
-		const auto ntr = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NTR), SHADOW_CAM_COL };
-		const auto nbr = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NBR), SHADOW_CAM_COL };
-		const auto nbl = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NBL), SHADOW_CAM_COL };
+		auto ntl = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NTL), SHVOL_FIN_COL };
+		auto ntr = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NTR), SHVOL_FIN_COL };
+		auto nbr = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NBR), SHVOL_FIN_COL };
+		auto nbl = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NBL), SHVOL_FIN_COL };
 
-		const auto ftl = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FTL), SHADOW_CAM_COL };
-		const auto ftr = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FTR), SHADOW_CAM_COL };
-		const auto fbr = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FBR), SHADOW_CAM_COL };
-		const auto fbl = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FBL), SHADOW_CAM_COL };
+		auto ftl = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FTL), SHVOL_FIN_COL };
+		auto ftr = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FTR), SHVOL_FIN_COL };
+		auto fbr = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FBR), SHVOL_FIN_COL };
+		auto fbl = VA_TYPE_C{ shadCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FBL), SHVOL_FIN_COL };
 
 		rb.AddVertices({ nbl, nbr }); // NBL - NBR
 		rb.AddVertices({ nbr, ntr }); // NBR - NTR
@@ -259,6 +260,27 @@ void CShadowHandler::DrawFrustumDebugMap() const
 		glLineWidth(6.0f);
 		sh.Enable();
 		sh.SetUniform("ucolor", 1.0f, 1.0f, 1.0f, 1.0f);
+		rb.DrawArrays(GL_LINES);
+		sh.Disable();
+
+		float3 extHeightVec = shadCam->forward * extraShadowCamHeight;
+		ntl.pos -= extHeightVec;
+		ntr.pos -= extHeightVec;
+		nbr.pos -= extHeightVec;
+		nbl.pos -= extHeightVec;
+
+		ntl.c = SHVOL_BEG_COL;
+		ntr.c = SHVOL_BEG_COL;
+		nbr.c = SHVOL_BEG_COL;
+		nbl.c = SHVOL_BEG_COL;
+
+		rb.AddVertices({ nbl, nbr }); // NBL - NBR
+		rb.AddVertices({ nbr, ntr }); // NBR - NTR
+		rb.AddVertices({ ntr, ntl }); // NTR - NTL
+		rb.AddVertices({ ntl, nbl }); // NTL - NBL
+
+		glLineWidth(3.0f);
+		sh.Enable();
 		rb.DrawArrays(GL_LINES);
 		sh.Disable();
 	}
@@ -862,8 +884,8 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 	// won't be included into the shadow cuboid bounds
 	//
 	// thus, the next step is to clip the worldCube by the near-far extended lightAABB and then transform it to the light space AABB
-	// since l,r,t,b bounds are already defined we only care about the extra height of the light cuboid / AABB (extraCamHeight)
-	float extraCamHeight = 0.0f;
+	// since l,r,t,b bounds are already defined we only care about the extra height of the light cuboid / AABB (extraShadowCamHeight)
+	extraShadowCamHeight = 0.0f;
 	{
 		AABB lightAABBExt = lightAABB;
 
@@ -880,15 +902,15 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 
 		// reuse lightAABBExt variable
 		lightAABBExt = wcClippedByShCubePoly.GetAABB(viewMatrix);
-		extraCamHeight = std::max(extraCamHeight, lightAABBExt.maxs.z);
+		extraShadowCamHeight = std::max(extraShadowCamHeight, lightAABBExt.maxs.z);
 	}
 
 	// shift camera further away to account for the calculation above
-	viewMatrix.col[3].z -= extraCamHeight;
+	viewMatrix.col[3].z -= extraShadowCamHeight;
 	// viewMatrixInv is local and no longer needed, so we don't care to update it with the change above
 
 	// translate mins.z accordingly
-	lightAABB.mins.z -= extraCamHeight;
+	lightAABB.mins.z -= extraShadowCamHeight;
 	// Make sure maxs.z is at the camera position
 	lightAABB.maxs.z = 0.0f; // @ camPos
 
