@@ -1,12 +1,12 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
 
-#ifndef _TEXTWRAP_H
-#define _TEXTWRAP_H
+#pragma once
 
 #include <string>
 #include <list>
 #include <array>
 
+#include "TextIterator.hpp"
 #include "FontHandler.h"
 #include "CFontTexture.h"
 #include "ustring.h"
@@ -21,14 +21,7 @@ public:
 
 	static constexpr float MAX_HEIGHT_DEFAULT = 1e3;
 
-	static constexpr char8_t OldColorCodeIndicator   = 0xFF; // ÿ
-	static constexpr char8_t OldColorCodeIndicatorEx = 0xFE; // þ
-	static constexpr char8_t ColorCodeIndicator   = 0x11; // dc1
-	static constexpr char8_t ColorCodeIndicatorEx = 0x12; // dc2
-	static constexpr char8_t ColorResetIndicator  = 0x08; // =: '\\b'
 
-	static constexpr char8_t CR = '\r';
-	static constexpr char8_t LF = '\n';
 public:
 	struct ColorCodeText {
 		std::array<char8_t, 1 + 4 + 4 + 1> storage; // reserve for [I,R,G,B,A,R,G,B,A] + \0
@@ -49,7 +42,15 @@ public:
 	virtual void ScanForWantedGlyphs(const spring::u8string& str) = 0;
 private:
 	struct word {
-		word() : width(0.0f), text(""), isSpace(false), isLineBreak(false), isColorCode(false), numSpaces(0), pos(0) {};
+		word()
+			: width(0.0f)
+			, text("")
+			, isSpace(false)
+			, isLineBreak(false)
+			, isColorCode(false)
+			, numSpaces(0)
+			, pos(0)
+		{};
 
 		float width;
 		spring::u8string text;
@@ -60,7 +61,11 @@ private:
 		unsigned int pos; //! position in the original text (needed for remerging colorcodes after wrapping; in printable chars (linebreaks and space don't count))
 	};
 	struct line {
-		line() : width(0.0f), cost(0.0f), forceLineBreak(false) {};
+		line()
+			: width(0.0f)
+			, cost(0.0f)
+			, forceLineBreak(false)
+		{};
 
 		std::list<word>::iterator start, end;
 		float width;
@@ -90,5 +95,3 @@ std::string CTextWrap::Wrap(const std::string& text, float fontSize, float maxWi
 {
 	return Wrap(toustring(text), fontSize, maxWidth, maxHeight);
 }
-
-#endif /* _TEXTWRAP_H */

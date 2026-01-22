@@ -4,6 +4,8 @@
 #include "glFontRenderer.h"
 #include "FontLogSection.h"
 #include "FontHandler.h"
+#include "FontConstants.hpp"
+#include "TextIterator.hpp"
 
 #include <cstdarg>
 #include <stdexcept>
@@ -301,8 +303,70 @@ bool CglFont::SkipColorCodesAndNewLines(const spring::u8string& text, int& curIn
 	return true;
 }
 
+class WidthCalculator : public TextIteratorHandler {
+private:
+	CglFont* font;
+	float curw = 0.0f;
+	float maxw = 0.0f;
+	char32_t prvGlyphIdx = 0;
+	const GlyphInfo* prvGlyphPtr = nullptr;
 
+public:
+	explicit WidthCalculator(CglFont* f) : font(f) {}
 
+	bool OnNewline(const CharEvent& e) override {
+		if (prvGlyphPtr != nullptr)
+			curw += font->GetCharacterWidth(prvGlyphIdx);
+
+		maxw = std::max(curw, maxw);
+		curw = 0.0f;
+		prvGlyphPtr = nullptr;
+		prvGlyphIdx = 0;
+		return true;
+	}
+
+	bool OnSpace(const CharEvent& e) override {
+		return OnPrintable(e); // Treat space as printable
+	}
+
+	bool OnPrintable(const CharEvent& e) override {
+		const GlyphInfo* curGlyphPtr = &font->GetGlyph(e.codepoint);
+		assert(curGlyphPtr != &CFontTexture::dummyGlyph);
+
+		if (prvGlyphPtr != nullptr) {
+			prvGlyphPtr = &font->GetGlyph(prvGlyphIdx);
+			assert(prvGlyphPtr != &CFontTexture::dummyGlyph);
+			curw += font->GetKerning(*prvGlyphPtr, *curGlyphPtr);
+		}
+
+		prvGlyphPtr = curGlyphPtr;
+		prvGlyphIdx = e.codepoint;
+		return true;
+	}
+
+	void OnEnd() override {
+		if (prvGlyphPtr != nullptr)
+			curw += font->GetCharacterWidth(prvGlyphIdx);
+	}
+public:
+	float getWidth() const { return std::max(curw, maxw); }
+};
+
+float CglFont::GetTextWidth_(const spring::u8string& text)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (text.empty())
+		return 0.0f;
+
+	auto lock = sync.GetScopedLock();
+	ScanForWantedGlyphs(text);
+
+	WidthCalculator calc(this);
+	TextIterator iterator(text, calc);
+	iterator.Execute();
+
+	return calc.getWidth();
+}
 
 float CglFont::GetCharacterWidth(const char32_t c)
 {
@@ -312,83 +376,46 @@ float CglFont::GetCharacterWidth(const char32_t c)
 	return glyph.advance;
 }
 
-float CglFont::GetTextWidth_(const spring::u8string& text)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	if (text.empty())
-		return 0.0f;
+class HeightCalculator : public TextIteratorHandler {
+private:
+	CglFont* font;
+	float h = 0.0f;
+	float d;
+	unsigned int multiLine = 1;
 
-	auto lock = sync.GetScopedLock();
+public:
+	explicit HeightCalculator(CglFont* f)
+		: font(f)
+		, d(f->GetLineHeight() + f->GetDescender())
+	{}
 
-	ScanForWantedGlyphs(text);
-
-	float curw = 0.0f;
-	float maxw = 0.0f;
-
-	char32_t prvGlyphIdx = 0;
-	char32_t curGlyphIdx = 0;
-
-	const GlyphInfo* prvGlyphPtr = nullptr;
-	const GlyphInfo* curGlyphPtr = nullptr;
-
-	for (int idx = 0, end = int(text.length()); idx < end; ) {
-		switch (curGlyphIdx = utf8::GetNextChar(text, idx)) {
-			// inlined colorcode; subtract 1 since GetNextChar increments idx
-			case ColorCodeIndicatorEx: [[fallthrough]];
-			case ColorCodeIndicator: {
-				idx = SkipColorCodes(text, idx - 1);
-			} break;
-
-			// reset color; no-op since GetNextChar increments idx
-			case ColorResetIndicator: {
-			} break;
-
-			case CR: {
-				idx += (idx < end && text[idx] == LF);
-				[[fallthrough]]; // CR; fall-through
-			}
-			case LF: {
-				// LF
-				if (prvGlyphPtr != nullptr)
-					curw += GetCharacterWidth(prvGlyphIdx);
-
-				maxw = std::max(curw, maxw);
-				curw = 0.0f;
-
-				prvGlyphPtr = nullptr;
-			} break;
-
-			case OldColorCodeIndicatorEx: [[fallthrough]];
-			case OldColorCodeIndicator: {
-				if (!fontHandler.disableOldColorIndicators) {
-					idx = SkipColorCodes(text, idx - 1);
-					break;
-				}
-				[[fallthrough]];
-			}
-
-			// printable char
-			default: {
-				curGlyphPtr = &GetGlyph(curGlyphIdx);
-				assert(curGlyphPtr != &CFontTexture::dummyGlyph);
-
-				if (prvGlyphPtr != nullptr) {
-					prvGlyphPtr = &GetGlyph(prvGlyphIdx);
-					assert(prvGlyphPtr != &CFontTexture::dummyGlyph);
-					curw += GetKerning(*prvGlyphPtr, *curGlyphPtr);
-				}
-
-				prvGlyphPtr = curGlyphPtr;
-				prvGlyphIdx = curGlyphIdx;
-			} break;
-		}
+	bool OnNewline(const CharEvent& e) {
+		multiLine++;
+		d = font->GetLineHeight() + font->GetDescender();
+		return true;
 	}
 
-	if (prvGlyphPtr != nullptr)
-		curw += GetCharacterWidth(prvGlyphIdx);
+	bool OnPrintable(const CharEvent& e) {
+		const GlyphInfo& g = font->GetGlyph(e.codepoint);
+		assert(&g != &CFontTexture::dummyGlyph);
 
-	return std::max(curw, maxw);
-}
+		d = std::min(d, g.descender);
+		h = std::max(h, g.height * (multiLine < 2));
+		return true;
+	}
+
+	bool OnSpace(const CharEvent& e) {
+		return OnPrintable(e); // Treat space as printable
+	}
+
+	void OnEnd() {
+		d -= ((multiLine - 1) * font->GetLineHeight() * (multiLine > 1));
+	}
+public:
+	float getHeight() const { return h; }
+	float getDescender() const { return d; }
+	int getNumLines() const { return multiLine; }
+};
 
 
 float CglFont::GetTextHeight_(const spring::u8string& text, float* descender, int* numLines)
@@ -401,65 +428,36 @@ float CglFont::GetTextHeight_(const spring::u8string& text, float* descender, in
 	}
 
 	auto lock = sync.GetScopedLock();
-
 	ScanForWantedGlyphs(text);
 
-	float h = 0.0f;
-	float d = GetLineHeight() + GetDescender();
+	HeightCalculator calc(this);
+	TextIterator iterator(text, calc);
+	iterator.Execute();
 
-	unsigned int multiLine = 1;
+	if (descender != nullptr) *descender = calc.getDescender();
+	if (numLines != nullptr) *numLines = calc.getNumLines();
 
-	for (int idx = 0, end = int(text.length()); idx < end; ) {
-		const char32_t u = utf8::GetNextChar(text, idx);
-
-		switch (u) {
-			// inlined colorcode; subtract 1 since GetNextChar increments idx
-			case ColorCodeIndicatorEx: [[fallthrough]];
-			case ColorCodeIndicator: {
-				idx = SkipColorCodes(text, idx - 1);
-			} break;
-
-			// reset color; no-op since GetNextChar increments idx
-			case ColorResetIndicator: {
-			} break;
-
-			case CR: {
-				idx += (idx < end && text[idx] == LF);
-				[[fallthrough]]; // CR; fall-through
-			}
-			case LF: {
-				// LF
-				multiLine++;
-				d = GetLineHeight() + GetDescender();
-			} break;
-
-			case OldColorCodeIndicatorEx: [[fallthrough]];
-			case OldColorCodeIndicator: {
-				if (!fontHandler.disableOldColorIndicators) {
-					idx = SkipColorCodes(text, idx - 1);
-					break;
-				}
-				[[fallthrough]];
-			}
-
-			// printable char
-			default: {
-				const GlyphInfo& g = GetGlyph(u);
-				assert(&g != &CFontTexture::dummyGlyph);
-
-				d = std::min(d, g.descender);
-				h = std::max(h, g.height * (multiLine < 2)); // only calculate height for the first line
-			} break;
-		}
-	}
-
-	d -= ((multiLine - 1) * GetLineHeight() * (multiLine > 1));
-
-	if (descender != nullptr) *descender = d;
-	if (numLines != nullptr) *numLines = multiLine;
-
-	return h;
+	return calc.getHeight();
 }
+
+class GlyphScanner : public TextIteratorHandler {
+private:
+	CglFont* font;
+	std::vector<char32_t>& missingGlyphs;
+
+public:
+	GlyphScanner(CglFont* f, std::vector<char32_t>& missing)
+		: font(f)
+		, missingGlyphs(missing)
+	{}
+
+	bool OnPrintable(const CharEvent& e) {
+		const GlyphInfo& curGlyph = font->GetGlyph(e.codepoint);
+		if (&curGlyph == &CFontTexture::dummyGlyph)
+			missingGlyphs.emplace_back(e.codepoint);
+		return true;
+	}
+};
 
 void CglFont::ScanForWantedGlyphs(const spring::u8string& ustr)
 {
@@ -467,45 +465,9 @@ void CglFont::ScanForWantedGlyphs(const spring::u8string& ustr)
 	static std::vector<char32_t> missingGlyphs;
 	missingGlyphs.clear();
 
-	char32_t nextChar = 0;
-
-	for (int idx = 0, end = int(ustr.length()); idx < end; ) {
-		switch (nextChar = utf8::GetNextChar(ustr, idx)) {
-			// inlined colorcode; subtract 1 since GetNextChar increments idx
-		case ColorCodeIndicatorEx: [[fallthrough]];
-		case ColorCodeIndicator: {
-			idx = SkipColorCodes(ustr, idx - 1);
-		} break;
-
-			// reset color; no-op since GetNextChar increments idx
-		case ColorResetIndicator: {
-		} break;
-
-		case CR: {
-			idx += (idx < end&& ustr[idx] == LF);
-			[[fallthrough]]; // CR; fall-through
-		}
-		case LF: {
-			// LF
-		} break;
-
-		case OldColorCodeIndicatorEx: [[fallthrough]];
-		case OldColorCodeIndicator: {
-			if (!fontHandler.disableOldColorIndicators) {
-				idx = SkipColorCodes(ustr, idx - 1);
-				break;
-			}
-			[[fallthrough]];
-		}
-
-			// printable char
-		default: {
-			const GlyphInfo& curGlyph = GetGlyph(nextChar);
-			if (&curGlyph == &CFontTexture::dummyGlyph)
-				missingGlyphs.emplace_back(nextChar);
-		} break;
-		}
-	}
+	GlyphScanner scanner(this, missingGlyphs);
+	TextIterator iterator(ustr, scanner);
+	iterator.Execute();
 
 	LoadWantedGlyphs(missingGlyphs);
 }

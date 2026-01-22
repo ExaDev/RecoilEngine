@@ -4,6 +4,7 @@
 #include "TextWrap.h"
 #include "glFont.h"
 #include "FontLogSection.h"
+#include "FontConstants.hpp"
 #include "System/Log/ILog.h"
 #include "System/SpringMath.h"
 #include "System/StringUtil.h"
@@ -11,9 +12,6 @@
 #include "System/Misc/TracyDefs.h"
 
 
-static constexpr char32_t spaceUTF16    = 0x20;
-static constexpr char32_t ellipsisUTF16 = 0x2026;
-static const std::string ellipsisUTF8 = utf8::FromUnicode(ellipsisUTF16);
 
 static constexpr const char* spaceStringTable[1 + 10] = {
 	"",
@@ -458,12 +456,23 @@ void CTextWrap::SplitTextInWords(const spring::u8string& text, std::list<word>* 
 	words->push_back(word());
 	word* w = &(words->back());
 
+	static ColorCode cc;
 	uint32_t numChar = 0;
-	for (int pos = 0; pos < length; pos++) {
+	for (uint32_t pos = 0; pos < length; pos++) {
 		const char8_t& c = text[pos];
+
+		uint32_t oldPos = pos;
+		pos = SkipColorCodes(text, pos, &cc.colorText);
+		if (pos != oldPos) {
+			cc.pos = numChar;
+			colorCodes.emplace_back(cc);
+			pos--; // -1 so for loop can "pos++"
+			continue;
+		}
+
 		switch(c) {
 			// space
-			case spaceUTF16:
+			case spaceUTF16: {
 				if (!w->isSpace) {
 					if (!w->isLineBreak) {
 						w->width = GetTextWidth(w->text);
@@ -475,32 +484,13 @@ void CTextWrap::SplitTextInWords(const spring::u8string& text, std::list<word>* 
 				}
 				w->numSpaces++;
 				w->width = spaceAdvance * w->numSpaces;
-				break;
-
-			// inlined colorcodes
-			case OldColorCodeIndicator:
-				if (fontHandler.disableOldColorIndicators)
-					break;
-				[[fallthrough]];
-			case OldColorCodeIndicatorEx:
-				if (fontHandler.disableOldColorIndicators)
-					break;
-				[[fallthrough]];
-			case ColorCodeIndicatorEx: [[fallthrough]];
-			case ColorCodeIndicator: [[fallthrough]];
-			case ColorResetIndicator: {
-				auto& cc = colorCodes.emplace_back();
-				cc.pos = numChar;
-
-				// -1 so for loop can "pos++"
-				pos = SkipColorCodes(text, pos, &cc.colorText) - 1;
 			} break;
 
 			// newlines
 			case CR: // CR+LF
 				pos += (pos + 1 < length && text[pos+1] == LF);
 				[[fallthrough]];
-			case LF: // LF
+			case LF: { // LF
 				if (w->isSpace) {
 					w->width = spaceAdvance * w->numSpaces;
 				} else if (!w->isLineBreak) {
@@ -510,10 +500,10 @@ void CTextWrap::SplitTextInWords(const spring::u8string& text, std::list<word>* 
 				w = &(words->back());
 				w->isLineBreak = true;
 				w->pos = numChar;
-				break;
+			} break;
 
 			// printable chars
-			default:
+			default: {
 				if (w->isSpace || w->isLineBreak) {
 					if (w->isSpace) {
 						w->width = spaceAdvance * w->numSpaces;
@@ -526,6 +516,7 @@ void CTextWrap::SplitTextInWords(const spring::u8string& text, std::list<word>* 
 				}
 				w->text += c;
 				numChar++;
+			}
 		}
 	}
 
