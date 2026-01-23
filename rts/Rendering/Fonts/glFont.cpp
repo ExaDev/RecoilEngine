@@ -38,9 +38,9 @@ CONFIG(bool, AllowColorFonts).defaultValue(false).description("Allow working wit
 std::shared_ptr<CglFont> font = nullptr;
 std::shared_ptr<CglFont> smallFont = nullptr;
 
-static constexpr float4        white(1.00f, 1.00f, 1.00f, 0.95f);
-static constexpr float4  darkOutline(0.05f, 0.05f, 0.05f, 0.95f);
-static constexpr float4 lightOutline(0.95f, 0.95f, 0.95f, 0.80f);
+static constexpr SColor        white(1.00f, 1.00f, 1.00f, 0.95f);
+static constexpr SColor  darkOutline(0.05f, 0.05f, 0.05f, 0.95f);
+static constexpr SColor lightOutline(0.95f, 0.95f, 0.95f, 0.80f);
 
 static const float darkLuminosity = 0.05f +
 	0.2126f * std::pow(darkOutline[0], 2.2f) +
@@ -209,15 +209,11 @@ void CglFont::glPrint(float x, float y, float s, const int options, const std::s
 void CglFont::glPrintTable(float x, float y, float s, const int options, const std::string& str) {}
 
 void CglFont::SetAutoOutlineColor(bool enable) {}
-void CglFont::SetTextColor(const float4* color) {}
-void CglFont::SetOutlineColor(const float4* color) {}
-void CglFont::SetColors(const float4* textColor, const float4* outlineColor) {}
+void CglFont::SetTextColor(const SColor* color) {}
+void CglFont::SetOutlineColor(const SColor* color) {}
+void CglFont::SetColors(const SColor* textColor, const SColor* outlineColor) {}
 
 float CglFont::GetCharacterWidth(const char32_t c) { return 1.0f; }
-bool CglFont::SkipColorCodesAndNewLines(const spring::u8string& text, int& curIndex, int& numLines)
-{
-	return true;
-}
 void CglFont::ScanForWantedGlyphs(const spring::u8string& str) {}
 float CglFont::GetTextWidth_(const spring::u8string& text) { return (text.size() * 1.0f); }
 float CglFont::GetTextHeight_(const spring::u8string& text, float* descender, int* numLines) { return 1.0f; }
@@ -227,81 +223,6 @@ std::deque<std::string> CglFont::SplitIntoLines(const spring::u8string& text) { 
 void CglFont::GetStats(std::array<size_t, 8>& stats) const {}
 
 #else
-
-
-bool CglFont::SkipColorCodesAndNewLines(const spring::u8string& text, int& curIndex, int& numLines)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	int idx = curIndex;
-	int nls = 0;
-
-	char32_t nextChar = 0;
-	for (int end = static_cast<int>(text.length()); idx < end; ) {
-		switch (nextChar = utf8::GetNextChar(text, idx, false/*do not advance*/)) {
-			case OldColorCodeIndicator:
-				if (fontHandler.disableOldColorIndicators) {
-					// same as default case
-					curIndex = idx;
-					numLines = nls;
-					return false;
-				}
-				[[fallthrough]];
-			case ColorCodeIndicator: {
-				if ((idx += 3 + 1) < end) {
-					const float4 newTextColor = { text[idx - 3] / 255.0f, text[idx - 2] / 255.0f, text[idx - 1] / 255.0f, 1.0f };
-					if (autoOutlineColor)
-						SetColors(&newTextColor, nullptr);
-					else
-						SetTextColor(&newTextColor);
-				}
-			} break;
-			case OldColorCodeIndicatorEx:
-				if (fontHandler.disableOldColorIndicators) {
-					// same as default case
-					curIndex = idx;
-					numLines = nls;
-					return false;
-				}
-				[[fallthrough]];
-			case ColorCodeIndicatorEx: {
-				if ((idx += 4 * 2 + 1) < end) {
-					const float4 newTextColor = { text[idx - 8] / 255.0f, text[idx - 7] / 255.0f, text[idx - 6] / 255.0f, text[idx - 5] / 255.0f };
-					const float4 newOutlColor = { text[idx - 4] / 255.0f, text[idx - 3] / 255.0f, text[idx - 2] / 255.0f, text[idx - 1] / 255.0f };
-					// ignore autoOutline here
-					SetColors(&newTextColor, &newOutlColor);
-				}
-			} break;
-
-			case ColorResetIndicator: {
-				idx += 1;
-				SetColors(&baseTextColor, &baseOutlineColor);
-			} break;
-
-			case CR: {
-				idx += (idx < end && text[idx + 1] == LF);
-				[[fallthrough]]; // CR; fall-through
-			}
-			case LF: {
-				// LF
-				idx += 1;
-				nls += 1;
-			} break;
-
-			default: {
-				// skip any non-printable ASCII chars which can only occur with
-				// malformed color-codes (e.g. when the ColorCodeIndicator/ColorCodeIndicatorEx byte is missing)
-				// idx += (text[idx] >= 127 && text[idx] <= 255);
-				curIndex = idx;
-				numLines = nls;
-				return false;
-			} break;
-		}
-	}
-
-	curIndex = idx;
-	numLines = nls;
-	return true;
-}
 
 class WidthCalculator : public TextIteratorHandler {
 private:
@@ -330,7 +251,7 @@ public:
 	}
 
 	bool OnPrintable(const CharEvent& e) override {
-		const GlyphInfo* curGlyphPtr = &font->GetGlyph(e.codepoint);
+		const GlyphInfo* curGlyphPtr = &font->GetGlyph(std::get<char32_t>(e.value));
 		assert(curGlyphPtr != &CFontTexture::dummyGlyph);
 
 		if (prvGlyphPtr != nullptr) {
@@ -340,7 +261,7 @@ public:
 		}
 
 		prvGlyphPtr = curGlyphPtr;
-		prvGlyphIdx = e.codepoint;
+		prvGlyphIdx = std::get<char32_t>(e.value);
 		return true;
 	}
 
@@ -396,7 +317,7 @@ public:
 	}
 
 	bool OnPrintable(const CharEvent& e) {
-		const GlyphInfo& g = font->GetGlyph(e.codepoint);
+		const GlyphInfo& g = font->GetGlyph(std::get<char32_t>(e.value));
 		assert(&g != &CFontTexture::dummyGlyph);
 
 		d = std::min(d, g.descender);
@@ -452,9 +373,9 @@ public:
 	{}
 
 	bool OnPrintable(const CharEvent& e) {
-		const GlyphInfo& curGlyph = font->GetGlyph(e.codepoint);
+		const GlyphInfo& curGlyph = font->GetGlyph(std::get<char32_t>(e.value));
 		if (&curGlyph == &CFontTexture::dummyGlyph)
-			missingGlyphs.emplace_back(e.codepoint);
+			missingGlyphs.emplace_back(std::get<char32_t>(e.value));
 		return true;
 	}
 };
@@ -571,7 +492,7 @@ void CglFont::SetAutoOutlineColor(bool enable)
 	autoOutlineColor = enable;
 }
 
-void CglFont::SetTextColor(const float4* color)
+void CglFont::SetTextColor(const SColor* color)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (color == nullptr)
@@ -582,7 +503,7 @@ void CglFont::SetTextColor(const float4* color)
 	textColor = *color;
 }
 
-void CglFont::SetOutlineColor(const float4* color)
+void CglFont::SetOutlineColor(const SColor* color)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (color == nullptr)
@@ -594,20 +515,21 @@ void CglFont::SetOutlineColor(const float4* color)
 }
 
 
-void CglFont::SetColors(const float4* _textColor, const float4* _outlineColor)
+void CglFont::SetColors(const SColor* _textColor, const SColor* _outlineColor)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	SetTextColor(_textColor);
 	SetOutlineColor(_outlineColor);
 }
 
-const float4* CglFont::ChooseOutlineColor(const float4& textColor)
+const SColor* CglFont::ChooseOutlineColor(const SColor& textColor)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	const auto fTextColor = static_cast<float4>(textColor);
 	const float luminosity =
-		0.2126f * std::pow(textColor[0], 2.2f) +
-		0.7152f * std::pow(textColor[1], 2.2f) +
-		0.0722f * std::pow(textColor[2], 2.2f);
+		0.2126f * std::pow(fTextColor[0], 2.2f) +
+		0.7152f * std::pow(fTextColor[1], 2.2f) +
+		0.0722f * std::pow(fTextColor[2], 2.2f);
 
 	const float maxLum = std::max(luminosity + 0.05f, darkLuminosity);
 	const float minLum = std::min(luminosity + 0.05f, darkLuminosity);
@@ -682,94 +604,117 @@ void CglFont::DrawWorldBuffered(bool userDefinedBlending)
 }
 
 template<int shiftXC, int shiftYC, bool outline>
-void CglFont::RenderStringImpl(float x, float y, float scaleX, float scaleY, const std::string& str)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	const spring::u8string& ustr = toustring(str);
-
-	ScanForWantedGlyphs(ustr);
-
-	const float startx = x;
-	const float lineHeight_ = scaleY * GetLineHeight();
-
-	char32_t curGlyphIdx = 0;
+class StringRenderer : public TextIteratorHandler {
+private:
+	CglFont* font;
+	float x, y, startx, scaleX, scaleY, lineHeight_;
 	char32_t prvGlyphIdx = 0;
-
-	int currentPos = 0;
 	int skippedLines = 0;
 
-	constexpr float texScaleX = 1.0f;
-	constexpr float texScaleY = 1.0f;
+public:
+	StringRenderer(CglFont* f, float x, float y, float sX, float sY)
+		: font(f), x(x), y(y), startx(x), scaleX(sX), scaleY(sY)
+		, lineHeight_(sY* f->GetLineHeight()) {
+	}
 
-	// check for end-of-string
-	while (!SkipColorCodesAndNewLines(ustr, currentPos, skippedLines)) {
-		curGlyphIdx = utf8::GetNextChar(ustr, currentPos);
+	bool OnColorCode(const CharEvent& e) override {
+		const auto& newTextColor = std::get<SColor>(e.value);
 
-		const GlyphInfo* curGlyphPtr = &GetGlyph(curGlyphIdx);
+		if (font->GetAutoOutlineColor())
+			font->SetColors(&newTextColor, nullptr);
+		else
+			font->SetTextColor(&newTextColor);
+
+		return true;
+	}
+
+	bool OnColorCodeEx(const CharEvent& e) override {
+		const auto& colors = std::get<FontColors>(e.value);
+		font->SetColors(&colors.textColor, &colors.outlineColor);
+		return true;
+	}
+
+	bool OnColorReset(const CharEvent& e) override {
+		font->SetColors(&font->GetBaseTextColor(), &font->GetBaseOutlineColor());
+		return true;
+	}
+
+	bool OnNewline(const CharEvent& e) override {
+		x = startx;
+		y -= (e.linesSkipped * lineHeight_);
+		prvGlyphIdx = 0;
+		return true;
+	}
+
+	bool OnSpace(const CharEvent& e) override {
+		return OnPrintable(e);
+	}
+
+	bool OnPrintable(const CharEvent& e) override {
+		const GlyphInfo* curGlyphPtr = &font->GetGlyph(std::get<char32_t>(e.value));
 		assert(curGlyphPtr != &CFontTexture::dummyGlyph);
-		const GlyphInfo* prvGlyphPtr = nullptr;
 
-		if (skippedLines > 0) {
-			x = startx;
-			y -= (skippedLines * lineHeight_);
-		}
-		else if (prvGlyphIdx != 0) {
-			prvGlyphPtr = &GetGlyph(prvGlyphIdx);
+		if (prvGlyphIdx != 0) {
+			const GlyphInfo* prvGlyphPtr = &font->GetGlyph(prvGlyphIdx);
 			assert(prvGlyphPtr != &CFontTexture::dummyGlyph);
-			x += (scaleX * GetKerning(*prvGlyphPtr, *curGlyphPtr));
+			x += (scaleX * font->GetKerning(*prvGlyphPtr, *curGlyphPtr));
 		}
 
-		prvGlyphPtr = curGlyphPtr;
-		prvGlyphIdx = curGlyphIdx;
+		prvGlyphIdx = std::get<char32_t>(e.value);
 
+		const auto& tc = curGlyphPtr->texCord;
+		const float dx0 = (scaleX * curGlyphPtr->size.x0()) + x;
+		const float dy0 = (scaleY * curGlyphPtr->size.y0()) + y;
+		const float dx1 = (scaleX * curGlyphPtr->size.x1()) + x;
+		const float dy1 = (scaleY * curGlyphPtr->size.y1()) + y;
+		const float tx0 = tc.x0();
+		const float ty0 = tc.y0();
+		const float tx1 = tc.x1();
+		const float ty1 = tc.y1();
 
-		const auto& tc = prvGlyphPtr->texCord;
-		const float dx0 = (scaleX * prvGlyphPtr->size.x0()) + x;
-		const float dy0 = (scaleY * prvGlyphPtr->size.y0()) + y;
-		const float dx1 = (scaleX * prvGlyphPtr->size.x1()) + x;
-		const float dy1 = (scaleY * prvGlyphPtr->size.y1()) + y;
-		const float tx0 = tc.x0() * texScaleX;
-		const float ty0 = tc.y0() * texScaleY;
-		const float tx1 = tc.x1() * texScaleX;
-		const float ty1 = tc.y1() * texScaleY;
+		const auto& textDepth = font->GetTextDepth();
+		const auto& textColor = font->GetTextColor();
+		const auto& outlineColor = font->GetOutlineColor();
+		const auto fontSize = font->GetFontSize();
 
+		auto& fontRenderer = font->GetFontRenderer();
 
 		if constexpr (shiftXC > 0 || shiftYC > 0 || outline) {
-			const auto& stc = prvGlyphPtr->shadowTexCord;
-			const float stx0 = stc.x0() * texScaleX;
-			const float sty0 = stc.y0() * texScaleY;
-			const float stx1 = stc.x1() * texScaleX;
-			const float sty1 = stc.y1() * texScaleY;
-
-			float shiftX = 0.0f;
-			float shiftY = 0.0f;
-			if constexpr (shiftXC > 0 || shiftYC > 0) {
-				shiftX = scaleX * static_cast<float>(shiftXC) / 100.0f;
-				shiftY = scaleY * static_cast<float>(shiftYC) / 100.0f;
-			}
-
-			float ssX = 0.0f;
-			float ssY = 0.0f;
-			if constexpr (outline) {
-				ssX = (scaleX / fontSize) * GetOutlineWidth();
-				ssY = (scaleY / fontSize) * GetOutlineWidth();
-			}
+			const auto& stc = curGlyphPtr->shadowTexCord;
+			float shiftX = (shiftXC > 0) ? scaleX * shiftXC / 100.0f : 0.0f;
+			float shiftY = (shiftYC > 0) ? scaleY * shiftYC / 100.0f : 0.0f;
+			float ssX = outline ? (scaleX / fontSize) * font->GetOutlineWidth() : 0.0f;
+			float ssY = outline ? (scaleY / fontSize) * font->GetOutlineWidth() : 0.0f;
 
 			fontRenderer->AddQuadTrianglesOB(
-				{ {dx0 + shiftX - ssX, dy0 - shiftY + ssY, textDepth.y},  stx0, sty0,  (&outlineColor.x) },
-				{ {dx1 + shiftX + ssX, dy0 - shiftY + ssY, textDepth.y},  stx1, sty0,  (&outlineColor.x) },
-				{ {dx1 + shiftX + ssX, dy1 - shiftY - ssY, textDepth.y},  stx1, sty1,  (&outlineColor.x) },
-				{ {dx0 + shiftX - ssX, dy1 - shiftY - ssY, textDepth.y},  stx0, sty1,  (&outlineColor.x) }
+				{ {dx0 + shiftX - ssX, dy0 - shiftY + ssY, textDepth.y}, stc.x0(), stc.y0(), outlineColor },
+				{ {dx1 + shiftX + ssX, dy0 - shiftY + ssY, textDepth.y}, stc.x1(), stc.y0(), outlineColor },
+				{ {dx1 + shiftX + ssX, dy1 - shiftY - ssY, textDepth.y}, stc.x1(), stc.y1(), outlineColor },
+				{ {dx0 + shiftX - ssX, dy1 - shiftY - ssY, textDepth.y}, stc.x0(), stc.y1(), outlineColor }
 			);
 		}
 
 		fontRenderer->AddQuadTrianglesPB(
-			{ {dx0, dy0, textDepth.x},  tx0, ty0,  (&textColor.x) },
-			{ {dx1, dy0, textDepth.x},  tx1, ty0,  (&textColor.x) },
-			{ {dx1, dy1, textDepth.x},  tx1, ty1,  (&textColor.x) },
-			{ {dx0, dy1, textDepth.x},  tx0, ty1,  (&textColor.x) }
+			{ {dx0, dy0, textDepth.x}, tx0, ty0, textColor },
+			{ {dx1, dy0, textDepth.x}, tx1, ty0, textColor },
+			{ {dx1, dy1, textDepth.x}, tx1, ty1, textColor },
+			{ {dx0, dy1, textDepth.x}, tx0, ty1, textColor }
 		);
+
+		return true;
 	}
+};
+
+template<int shiftXC, int shiftYC, bool outline>
+void CglFont::RenderStringImpl(float x, float y, float scaleX, float scaleY, const std::string& str)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	const spring::u8string& ustr = toustring(str);
+	ScanForWantedGlyphs(ustr);
+
+	StringRenderer<shiftXC, shiftYC, outline> renderer(this, x, y, scaleX, scaleY);
+	TextIterator iterator(ustr, renderer);
+	iterator.Execute();
 }
 
 void CglFont::glWorldPrint(const float3& p, const float size, const std::string& str, int options)
@@ -894,6 +839,200 @@ void CglFont::glPrint(float x, float y, float s, const int options, const std::s
 	SetColors(&baseTextColor, &baseOutlineColor);
 }
 
+// leave unmodified for now
+#if 0
+class TablePrinter : public TextIteratorHandler {
+private:
+    const spring::u8string& text;
+    std::vector<std::string>& colLines;
+    std::vector<SColor>& colColor;
+    SColor& curColor;
+    const SColor& defColor;
+    int& col;
+    int& row;
+    
+public:
+    TablePrinter(
+        const spring::u8string& text,
+        std::vector<std::string>& colLines,
+        std::vector<SColor>& colColor,
+        SColor& curColor,
+        const SColor& defColor,
+        int& col,
+        int& row
+    )
+        : text(text)
+        , colLines(colLines)
+        , colColor(colColor)
+        , curColor(curColor)
+        , defColor(defColor)
+        , col(col)
+        , row(row)
+    {}
+    
+    bool OnColorCode(const CharEvent& e) override {
+        // Add color code bytes to current column
+        for (int i = e.startIdx; i < e.endIdx && i < text.length(); ++i) {
+            colLines[col] += text[i];
+        }
+        
+		curColor = std::get<SColor>(e.value);
+        return true;
+    }
+
+    bool OnColorReset(const CharEvent& e) override {
+        colLines[col] += ColorResetIndicator;
+        return true;
+    }
+    
+    bool OnNewline(const CharEvent& e) override {
+        for (auto& colLine : colLines)
+            colLine += LF;
+        
+        // Reset color in first column if needed
+        if (colColor[0] != curColor) {
+            for (int i = 0; i < 4; ++i)
+                colLines[0] += curColor[i];
+            colColor[0] = curColor;
+        }
+        
+        col = 0;
+        row += 1;
+        return true;
+    }
+    
+    bool OnSpace(const CharEvent& e) override {
+        if (std::get<char32_t>(e.value) == '\t') {
+            // Tab is column separator
+            if ((col += 1) >= colLines.size()) {
+                colLines.emplace_back("");
+                // Add newlines for current row
+                for (int i = 0; i < row; ++i)
+                    colLines[col] += LF;
+                colColor.push_back(defColor);
+            }
+            // Apply current color to new column if different
+            if (colColor[col] != curColor) {
+                for (int i = 0; i < 4; ++i)
+                    colLines[col] += curColor[i];
+                colColor[col] = curColor;
+            }
+        } else {
+            // Regular space - add original bytes
+            for (int i = e.startIdx; i < e.endIdx; ++i) {
+                colLines[col] += text[i];
+            }
+        }
+        return true;
+    }
+    
+    bool OnPrintable(const CharEvent& e) override {
+        // Add original character bytes to current column
+        for (int i = e.startIdx; i < e.endIdx; ++i) {
+            colLines[col] += text[i];
+        }
+        return true;
+    }
+};
+
+void CglFont::glPrintTable(float x, float y, float s, const int options, const std::string& text)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+
+	const spring::u8string& ustr = toustring(text);
+
+	std::vector<std::string> colLines;
+	std::vector<float> colWidths;
+	std::vector<SColor> colColor;
+
+	SColor defColor(255, 0, 0);
+	SColor curColor(255, 0, 0);
+
+	for (int i = 0; i < 3; ++i) {
+		defColor[i + 1] = uint8_t(textColor[i] * 255.0f);
+		curColor[i + 1] = defColor[i + 1];
+	}
+
+	colLines.emplace_back("");
+	colColor.push_back(defColor);
+
+	int col = 0;
+	int row = 0;
+
+	// Parse text into columns using TextIterator
+	TablePrinter printer(ustr, colLines, colColor, curColor, defColor, col, row);
+	TextIterator iterator(ustr, printer);
+	iterator.Execute();
+
+	// Calculate dimensions
+	float totalWidth = 0.0f;
+	float maxHeight = 0.0f;
+	float minDescender = 0.0f;
+
+	colWidths.resize(colLines.size(), 0.0f);
+
+	for (size_t i = 0; i < colLines.size(); ++i) {
+		colWidths[i] = GetTextWidth(colLines[i]);
+		totalWidth += colWidths[i];
+
+		float textDescender;
+		float textHeight = GetTextHeight(colLines[i], &textDescender);
+
+		maxHeight = std::max(maxHeight, textHeight);
+		minDescender = std::min(minDescender, textDescender);
+	}
+
+	// Calculate size
+	float ss = s;
+	if (options & FONT_SCALE)
+		ss *= fontSize;
+
+	float sizeX = ss;
+	float sizeY = ss;
+
+	// Render in normalized coords (0..1) instead of screencoords (0..~1024)
+	if (options & FONT_NORM) {
+		sizeX *= globalRendering->pixelX;
+		sizeY *= globalRendering->pixelY;
+	}
+
+	// Horizontal alignment (FONT_LEFT is default)
+	if (options & FONT_CENTER) {
+		x -= (sizeX * 0.5f * totalWidth);
+	}
+	else if (options & FONT_RIGHT) {
+		x -= (sizeX * totalWidth);
+	}
+
+	// Vertical alignment
+	if (options & FONT_BASELINE) {
+		// nothing
+	}
+	else if (options & FONT_DESCENDER) {
+		y -= (sizeY * GetDescender());
+	}
+	else if (options & FONT_VCENTER) {
+		y -= (sizeY * 0.5f * maxHeight);
+		y -= (sizeY * 0.5f * minDescender);
+	}
+	else if (options & FONT_TOP) {
+		y -= (sizeY * maxHeight);
+	}
+	else if (options & FONT_ASCENDER) {
+		y -= (sizeY * (GetDescender() + 1.0f));
+	}
+	else if (options & FONT_BOTTOM) {
+		y -= (sizeY * minDescender);
+	}
+
+	// Render each column
+	for (size_t i = 0; i < colLines.size(); ++i) {
+		glPrint(x, y, s, (options | FONT_BASELINE) & ~(FONT_RIGHT | FONT_CENTER), colLines[i]);
+		x += (sizeX * colWidths[i]);
+	}
+}
+
+#else
 // TODO: remove, only used by PlayerRosterDrawer
 void CglFont::glPrintTable(float x, float y, float s, const int options, const std::string& text)
 {
@@ -1049,6 +1188,7 @@ void CglFont::glPrintTable(float x, float y, float s, const int options, const s
 		x += (sizeX * colWidths[i]);
 	}
 }
+#endif
 
 void CglFont::GetStats(std::array<size_t, 8>& stats) const
 {

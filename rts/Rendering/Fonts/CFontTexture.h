@@ -134,6 +134,9 @@ public:
 	float GetLineHeight() const { return lineHeight; }
 	float GetDescender() const { return fontDescender; }
 	int GetTexture() const { return glyphAtlasTextureID; }
+	const auto GetFontSize() const { return fontSize; }
+
+	auto& GetFontRenderer() { return fontRenderer; }
 
 	const std::string& GetFamily() const { return fontFamily; }
 	const std::string& GetStyle() const { return fontStyle; }
