@@ -12,35 +12,14 @@
 #include "ustring.h"
 #include "System/Color.h"
 
-class CTextWrap : public CFontTexture
-{
-public:
-	//! Adds \n's (and '...' if it would be too high) until the text fits into maxWidth/maxHeight
-	inline int WrapInPlace(std::string& text, float fontSize,  float maxWidth, float maxHeight = MAX_HEIGHT_DEFAULT);
-	inline std::string Wrap(const std::string& text, float fontSize, float maxWidth, float maxHeight = MAX_HEIGHT_DEFAULT);
-
-	static constexpr float MAX_HEIGHT_DEFAULT = 1e3;
-
-
-public:
-	struct ColorCodeText {
-		std::array<char8_t, 1 + 4 + 4 + 1> storage; // reserve for [I,R,G,B,A,R,G,B,A] + \0
-		uint8_t size;
-	};
+namespace TextWrapHelpers {
+	using ColorCodeText = std::variant<SColor, FontColors>;
 	struct ColorCode {
-		auto tostring() const { return std::string(reinterpret_cast<const char*>(colorText.storage.data()), colorText.size); }
+		std::string tostring() const;
 		ColorCodeText colorText;
 		uint32_t pos;
 	};
-protected:
-	CTextWrap(const std::string& fontfile, int size, int outlinesize, float  outlineweight);
-	virtual ~CTextWrap() {}
-protected:
-	uint32_t SkipColorCodes(const spring::u8string& text, uint32_t idx, ColorCodeText* cctPtr = nullptr);
-public:
-	virtual float GetTextWidth(const std::string& text) = 0;
-	virtual void ScanForWantedGlyphs(const spring::u8string& str) = 0;
-private:
+
 	struct word {
 		word()
 			: width(0.0f)
@@ -72,7 +51,29 @@ private:
 		float cost;
 		bool forceLineBreak;
 	};
+}
 
+using namespace TextWrapHelpers;
+
+class CTextWrap : public CFontTexture
+{
+public:
+	//! Adds \n's (and '...' if it would be too high) until the text fits into maxWidth/maxHeight
+	inline int WrapInPlace(std::string& text, float fontSize,  float maxWidth, float maxHeight = MAX_HEIGHT_DEFAULT);
+	inline std::string Wrap(const std::string& text, float fontSize, float maxWidth, float maxHeight = MAX_HEIGHT_DEFAULT);
+
+	static constexpr float MAX_HEIGHT_DEFAULT = 1e3;
+
+
+public:
+
+protected:
+	CTextWrap(const std::string& fontfile, int size, int outlinesize, float  outlineweight);
+	virtual ~CTextWrap() {}
+public:
+	virtual float GetTextWidth(const std::string& text) = 0;
+	virtual void ScanForWantedGlyphs(const spring::u8string& str) = 0;
+private:
 	word SplitWord(word& w, float wantedWidth, bool smart = true);
 
 	void SplitTextInWords(const spring::u8string& text, std::list<word>* words, std::list<ColorCode>& colorCodes);
