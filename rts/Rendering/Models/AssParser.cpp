@@ -841,8 +841,11 @@ void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, cons
 			(mesh->HasTangentsAndBitangents() ? "Y" : "N"),
 			(mesh->HasTextureCoords(0) ? "Y" : "N"));
 
-		piece->vertices.reserve(piece->vertices.size() + mesh->mNumVertices);
-		piece->indices.reserve(piece->indices.size() + mesh->mNumFaces * 3);
+		auto& verts = piece->GetVerticesVec();
+		auto& indcs = piece->GetIndicesVec();
+
+		verts.reserve(verts.size() + mesh->mNumVertices);
+		indcs.reserve(indcs.size() + mesh->mNumFaces * 3);
 
 		meshVertexMapping.clear();
 		meshVertexMapping.reserve(mesh->mNumVertices);
@@ -903,8 +906,8 @@ void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, cons
 				vertex.texCoords[uvChanIndex].y = mesh->mTextureCoords[uvChanIndex][vertexIndex].y;
 			}
 
-			meshVertexMapping.push_back(piece->vertices.size());
-			piece->vertices.push_back(vertex);
+			meshVertexMapping.push_back(verts.size());
+			verts.push_back(vertex);
 		}
 
 		// extract face data
@@ -928,7 +931,7 @@ void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, cons
 			for (unsigned vertexListID = 0; vertexListID < face.mNumIndices; ++vertexListID) {
 				const unsigned int vertexFaceIdx = face.mIndices[vertexListID];
 				const unsigned int vertexDrawIdx = meshVertexMapping[vertexFaceIdx];
-				piece->indices.push_back(vertexDrawIdx);
+				indcs.push_back(vertexDrawIdx);
 			}
 		}
 	}

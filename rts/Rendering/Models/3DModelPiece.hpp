@@ -125,7 +125,7 @@ protected:
 	std::vector<uint32_t> indices;
 	std::vector<uint32_t> shatterIndices;
 
-	S3DModel* model;
+	S3DModel* model = nullptr;
 public:
-	friend class CAssParser;
+	//friend class CAssParser;
 };
