@@ -13,10 +13,9 @@
 #include "System/Color.h"
 
 namespace TextWrapHelpers {
-	using ColorCodeText = std::variant<SColor, FontColors>;
 	struct ColorCode {
 		std::string tostring() const;
-		ColorCodeText colorText;
+		CharVariant colorText;
 		uint32_t pos;
 	};
 

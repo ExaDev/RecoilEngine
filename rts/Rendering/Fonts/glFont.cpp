@@ -393,96 +393,98 @@ void CglFont::ScanForWantedGlyphs(const spring::u8string& ustr)
 	LoadWantedGlyphs(missingGlyphs);
 }
 
+struct SplitIntoLinesHandler final : TextIteratorHandler {
+	const spring::u8string& text;
+
+	std::deque<std::string> lines;
+	std::deque<std::string> colorCodeStack;
+
+	explicit SplitIntoLinesHandler(const spring::u8string& text)
+		: text(text)
+	{
+		lines.emplace_back("");
+	}
+
+	void AppendBytesToCurrentLine(const CharEvent& e)
+	{
+		auto& out = lines.back(); // last element [web:18]
+		for (int i = e.startIdx; i < e.endIdx; ++i) {
+			out.push_back(static_cast<char>(text[i]));
+		}
+	}
+
+	void StartNewLineWithActiveColor()
+	{
+		lines.emplace_back("");
+
+		// Old code used only top-of-stack (#else path).
+		if (!colorCodeStack.empty())
+			lines.back() = colorCodeStack.back(); // back() is O(1) [web:18]
+	}
+
+	bool OnColorCode(const CharEvent& e) override
+	{
+		// Only keep it if there is more text after the full code sequence (old: idx+4 < end).
+		if (e.endIdx < static_cast<int>(text.size())) {
+			auto cc = e.ToString();
+			colorCodeStack.emplace_back(cc);
+			lines.back() += cc;
+		}
+		return true;
+	}
+
+	bool OnColorCodeEx(const CharEvent& e) override
+	{
+		// Only keep it if there is more text after the full code sequence (old: idx+9 < end).
+		if (e.endIdx < static_cast<int>(text.size())) {
+			auto cc = e.ToString();
+			colorCodeStack.emplace_back(cc);
+			lines.back() += cc;
+		}
+		return true;
+	}
+
+	bool OnColorReset(const CharEvent& e) override
+	{
+		if (!colorCodeStack.empty())
+			colorCodeStack.pop_back(); // removes last element [web:16]
+		AppendBytesToCurrentLine(e);   // keep the reset marker in the output like the old code did
+		return true;
+	}
+
+	bool OnNewline(const CharEvent&) override
+	{
+		StartNewLineWithActiveColor();
+		return true;
+	}
+
+	bool OnPrintable(const CharEvent& e) override
+	{
+		AppendBytesToCurrentLine(e);
+		return true;
+	}
+
+	bool OnSpace(const CharEvent& e) override
+	{
+		AppendBytesToCurrentLine(e);
+		return true;
+	}
+};
+
 
 std::deque<std::string> CglFont::SplitIntoLines(const spring::u8string& text)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	std::deque<std::string> lines;
-	std::deque<std::string> colorCodeStack;
 
 	if (text.empty())
-		return lines;
+		return {};
 
-	lines.emplace_back("");
+	SplitIntoLinesHandler h(text);
+	TextIterator it(text, h);
+	it.Execute();
 
-	for (int idx = 0, end = text.length(); idx < end; idx++) {
-		const char8_t& c = text[idx];
-
-		switch (c) {
-			// inlined colorcode; push to stack if [I,R,G,B] is followed by more text
-			case OldColorCodeIndicator: {
-				if (fontHandler.disableOldColorIndicators) {
-					// same as 'default' case
-					lines.back() += c;
-					break;
-				}
-				[[fallthrough]];
-			}
-			case ColorCodeIndicator: {
-				if ((idx + 3 + 1) < end) {
-					colorCodeStack.emplace_back(text.substr(idx, 4));
-					lines.back() += colorCodeStack.back();
-
-					// compensate for loop-incr
-					idx -= 1;
-					idx += 4;
-				}
-			} break;
-			case OldColorCodeIndicatorEx: {
-				if (fontHandler.disableOldColorIndicators) {
-					// same as 'default' case
-					lines.back() += c;
-					break;
-				}
-				[[fallthrough]];
-			}
-			// inlined colorcodeEx; push to stack if [I,R,G,B,A,R,G,B,A] is followed by more text
-			case ColorCodeIndicatorEx: {
-				if ((idx + 4 * 2 + 1) < end) {
-					colorCodeStack.emplace_back(text.substr(idx, 9));
-					lines.back() += colorCodeStack.back();
-
-					// compensate for loop-incr
-					idx -= 1;
-					idx += 9;
-				}
-			} break;
-
-			// reset color
-			case ColorResetIndicator: {
-				if (!colorCodeStack.empty())
-					colorCodeStack.pop_back();
-				lines.back() += c;
-			} break;
-
-			case CR: {
-				idx += ((idx + 1) < end && text[idx + 1] == LF);
-				[[fallthrough]]; // CR; fall-through
-			}
-			case LF: {
-				lines.emplace_back("");
-
-				#if 0
-				for (auto& color: colorCodeStack)
-					lines.back() = color;
-				#else
-				if (!colorCodeStack.empty())
-					lines.back() = colorCodeStack.back();
-				#endif
-			} break;
-
-			default: {
-				// printable char or orphaned (c >= 127 && c <= 255) color-code
-				lines.back() += c;
-			} break;
-		}
-	}
-
-	return lines;
+	return std::move(h.lines);
 }
-
-
-
 
 void CglFont::SetAutoOutlineColor(bool enable)
 {

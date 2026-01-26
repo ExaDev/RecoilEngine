@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "ustring.h"
 #include <variant>
@@ -11,12 +11,16 @@ struct FontColors {
     SColor outlineColor;
 };
 
+using CharVariant = std::variant<char32_t, SColor, FontColors>;
+std::string CharVariantToString(const CharVariant& cv);
+
 struct CharEvent {
     int startIdx;
     int endIdx;
     int linesSkipped;
 
-    std::variant<char32_t, SColor, FontColors> value;
+    CharVariant value;
+    inline std::string ToString() const { return CharVariantToString(value); }
 };
 
 struct TextIteratorHandler {

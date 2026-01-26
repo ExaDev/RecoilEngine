@@ -4,6 +4,7 @@
 #include "FontConstants.hpp"
 #include "System/StringUtil.h"
 #include "System/Misc/TracyDefs.h"
+#include "System/TemplateUtils.hpp"
 
 void TextIterator::Execute()
 {
@@ -130,4 +131,39 @@ bool TextIterator::ExtractColorEx(CharEvent& e) const
         }
     };
     return true;
+}
+
+std::string CharVariantToString(const CharVariant& cv)
+{
+    return std::visit([](const auto& v) -> std::string {
+        using T = std::decay_t<decltype(v)>;
+        std::string res;
+        if constexpr (std::is_same_v<T, SColor>) {
+            res.resize(1 + 3);
+            res[0] = fontHandler.disableOldColorIndicators ? ColorCodeIndicator : OldColorCodeIndicator;
+            res[1] = v.r;
+            res[2] = v.g;
+            res[3] = v.b;
+        }
+        else if constexpr (std::is_same_v<T, FontColors>) {
+            res.resize(1 + 4 + 4);
+            res[0] = fontHandler.disableOldColorIndicators ? ColorCodeIndicatorEx : OldColorCodeIndicatorEx;
+            res[1] = v.textColor.r;
+            res[2] = v.textColor.g;
+            res[3] = v.textColor.b;
+            res[4] = v.textColor.a;
+            res[5] = v.outlineColor.r;
+            res[6] = v.outlineColor.g;
+            res[7] = v.outlineColor.b;
+            res[8] = v.outlineColor.a;
+        }
+        else if constexpr (std::is_same_v<T, char32_t>) {
+            return utf8::FromUnicode(v);
+        }
+        else {
+            static_assert(Recoil::always_false_v<T>, "Unhandled visited type");
+        }
+
+        return res;
+    }, cv);
 }
