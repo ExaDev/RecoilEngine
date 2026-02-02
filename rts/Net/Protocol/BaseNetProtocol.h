@@ -26,7 +26,6 @@ struct PlayerStatistics;
 struct TeamStatistics;
 
 
-static const uint16_t NETWORK_VERSION = 2027;
 
 
 /**
