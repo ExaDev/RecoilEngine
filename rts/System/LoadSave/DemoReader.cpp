@@ -29,6 +29,8 @@ static bool CheckDemoHeader(const DemoFileHeader& fileHeader)
 
 	if (fileHeader.version != DEMOFILE_VERSION)
 		return false;
+	if (fileHeader.networkVersion != SpringVersion::NETWORK_VERSION)
+		return false;
 
 	if (fileHeader.headerSize != sizeof(DemoFileHeader))
 		return false;
