@@ -11,6 +11,7 @@
 #include "Sim/Misc/CollisionVolume.h"
 #include "System/Matrix44f.h"
 #include "System/Transform.hpp"
+#include "System/AABB.hpp"
 
 struct S3DModel;
 struct S3DModelPiece {
@@ -33,27 +34,33 @@ struct S3DModelPiece {
 
 		bposeTransform.LoadIdentity();
 
+		emitPos = ZeroVector;
+		emitDir = ZeroVector;
+
 		offset = ZeroVector;
 		goffset = ZeroVector;
 		scale = 1.0f;
 
-		mins = DEF_MIN_SIZE;
-		maxs = DEF_MAX_SIZE;
+		aabb = {};
+
+		vertOffset = ~0u;
+		vertCount = 0;
 
 		vertIndex = ~0u;
 		indxStart = ~0u;
 		indxCount = ~0u;
 	}
 
-	virtual float3 GetEmitPos() const;
-	virtual float3 GetEmitDir() const;
+	void SetEmitters();
+
+	const auto& GetEmitPos() const { return emitPos; }
+	const auto& GetEmitDir() const { return emitDir; }
 
 	// internal use
-	const float3& GetVertexPos(const int idx) const { return vertices[idx].pos; }
-	const float3& GetNormal(const int idx) const { return vertices[idx].normal; }
+	const auto& GetVertexPos(const int idx) const { return vertices[idx].pos; }
+	const auto& GetNormal(const int idx) const { return vertices[idx].normal; }
 
 	virtual void PostProcessGeometry(uint32_t pieceIndex);
-
 
 	void DrawElements(uint32_t prim = 0x0004/*GL_TRIANGLES*/) const;
 	static void DrawShatterElements(uint32_t vboIndxStart, uint32_t vboIndxCount, uint32_t prim = 0x0004/*GL_TRIANGLES*/);
@@ -84,6 +91,8 @@ public:
 
 	void ReleaseShatterIndices();
 
+	void SetMinMaxExtends();
+
 	const std::vector<SVertexData>& GetVerticesVec() const { return vertices; }
 	const std::vector<uint32_t>& GetIndicesVec() const { return indices; }
 	const std::vector<uint32_t>& GetShatterIndicesVec() const { return shatterIndices; }
@@ -110,12 +119,17 @@ public:
 	// baked local-space rotations
 	std::optional<Transform> bakedTransform;
 
+	float3 emitPos = ZeroVector;
+	float3 emitDir = ZeroVector;
+
 	float3 offset;      /// local (piece-space) offset wrt. parent piece
 	float3 goffset;     /// global (model-space) offset wrt. root piece
 	float scale{1.0f};  /// baked uniform scaling factor (assimp-only)
 
-	float3 mins = DEF_MIN_SIZE;
-	float3 maxs = DEF_MAX_SIZE;
+	AABB aabb;
+
+	uint32_t vertOffset = ~0u;
+	uint32_t vertCount  = 0;
 
 	uint32_t vertIndex = ~0u; // global vertex number offset
 	uint32_t indxStart = ~0u; // global Index VBO offset

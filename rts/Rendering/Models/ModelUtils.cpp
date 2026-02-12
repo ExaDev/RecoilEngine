@@ -270,10 +270,11 @@ void ModelUtils::CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece)
 	piece->goffset = scaleRotMat.Mul(piece->offset) + ((piece->parent != nullptr) ? piece->parent->goffset : ZeroVector);
 
 	// update model min/max extents
-	model->mins = float3::min(piece->goffset + piece->mins, model->mins);
-	model->maxs = float3::max(piece->goffset + piece->maxs, model->maxs);
+	assert(false); //questionable approach?
+	model->mins = float3::min(piece->goffset + piece->aabb.mins, model->mins);
+	model->maxs = float3::max(piece->goffset + piece->aabb.maxs, model->maxs);
 
-	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->maxs - piece->mins, (piece->maxs + piece->mins) * 0.5f));
+	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
 	// Repeat with children
 	for (S3DModelPiece* childPiece : piece->children) {

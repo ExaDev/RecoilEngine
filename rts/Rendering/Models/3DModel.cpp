@@ -3,6 +3,7 @@
 #include "3DModel.hpp"
 
 #include <algorithm>
+#include <ranges>
 
 #include "3DModelMisc.hpp"
 #include "3DModelPiece.hpp"
@@ -138,9 +139,6 @@ void S3DModel::UpdatePiecesMinMaxExtents()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	for (auto* piece : pieceObjects) {
-		for (const auto& vertex : piece->GetVerticesVec()) {
-			piece->mins = float3::min(piece->mins, vertex.pos);
-			piece->maxs = float3::max(piece->maxs, vertex.pos);
-		}
+		piece->aabb.AddPoints(piece->GetVerticesVec() | std::views::transform(&SVertexData::pos));
 	}
 }

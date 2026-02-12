@@ -387,19 +387,13 @@ S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::
 	piece->CalcNormals();
 	piece->SetMinMaxExtends();
 
-	switch (piece->verts.size()) {
-		case 0: { piece->emitDir =    FwdVector   ; } break;
-		case 1: { piece->emitDir = piece->verts[0]; } break;
-		default: {
-			piece->emitPos = piece->verts[0];
-			piece->emitDir = piece->verts[1] - piece->verts[0];
-		} break;
-	}
+	piece->SetEmitters();
 
-	model->mins = float3::min(piece->goffset + piece->mins, model->mins);
-	model->maxs = float3::max(piece->goffset + piece->maxs, model->maxs);
+	assert(false);
+	model->mins = float3::min(piece->goffset + piece->aabb.mins, model->mins);
+	model->maxs = float3::max(piece->goffset + piece->aabb.maxs, model->maxs);
 
-	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->maxs - piece->mins, (piece->maxs + piece->mins) * 0.5f));
+	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
 	if (me.OffsetToChildObject > 0)
 		piece->children.push_back(LoadPiece(model, piece, buf, me.OffsetToChildObject));
@@ -502,16 +496,6 @@ void S3DOPiece::CalcNormals()
 			// now make the normal for vertex <a> equal the smoothed normal
 			curFace.vnormals[a] = smoothedNormal.SafeANormalize();
 		}
-	}
-}
-
-
-void S3DOPiece::SetMinMaxExtends()
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	for (const float3 vp: verts) {
-		mins = float3::min(mins, vp);
-		maxs = float3::max(maxs, vp);
 	}
 }
 

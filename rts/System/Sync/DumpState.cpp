@@ -403,8 +403,8 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 				file << "\t\t\toffset: " << TapFloats(p->offset);
 				file << "\t\t\tgoffset: " << TapFloats(p->goffset);
 				file << "\t\t\tscales: " << TapFloats(p->scale);
-				file << "\t\t\tscales: " << TapFloats(p->mins);
-				file << "\t\t\tscales: " << TapFloats(p->maxs);
+				file << "\t\t\tscales: " << TapFloats(p->aabb.mins);
+				file << "\t\t\tscales: " << TapFloats(p->aabb.maxs);
 
 				// GetVerticesVec and GetIndicesVec are now empty after upload to GPu is complete
 #if 0

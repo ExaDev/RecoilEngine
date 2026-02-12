@@ -1038,6 +1038,8 @@ SAssPiece* CAssParser::LoadPiece(
 		LoadPiece(model, pieceNode->mChildren[i], scene, modelTable, skipList, pieceMap, parentMap);
 	}
 
+	piece->SetEmitters();
+
 	pieceMap[piece->name] = piece;
 	return piece;
 }

@@ -45,7 +45,6 @@ public:
 	void SetIndex(int idx, const unsigned int drawIdx) { indices[idx] = drawIdx; }
 
 	void Trianglize();
-	void SetMinMaxExtends();
 	void SetVertexTangents();
 
 public:

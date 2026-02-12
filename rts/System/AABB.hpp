@@ -78,8 +78,9 @@ public:
 	}
 
 	float3 CalcCenter(const CMatrix44f& mat) const { return (mat * CalcCenter()); }
-	float3 CalcCenter() const { return ((maxs + mins) * 0.5f); }
-	float3 CalcScales() const { return ((maxs - mins) * 0.5f); }
+	float3 CalcCenter() const { return (maxs + mins) * 0.5f; }
+	float3 CalcScales() const { return (maxs - mins) * 0.5f; }
+	float3 CalcFullScales() const { return maxs - mins; }
 
 	float CalcRadiusSq() const { return (CalcScales().SqLength()); }
 	float CalcRadius() const { return (CalcScales().Length()); }

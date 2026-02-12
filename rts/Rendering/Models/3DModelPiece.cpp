@@ -56,28 +56,6 @@ void S3DModelPiece::DrawStaticLegacyRec() const
 	S3DModelHelpers::UnbindLegacyAttrVBOs();
 }
 
-
-float3 S3DModelPiece::GetEmitPos() const
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	switch (vertices.size()) {
-		case 0:
-		case 1: { return ZeroVector; } break;
-		default: { return GetVertexPos(0); } break;
-	}
-}
-
-float3 S3DModelPiece::GetEmitDir() const
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	switch (vertices.size()) {
-		case 0: { return FwdVector; } break;
-		case 1: { return GetVertexPos(0); } break;
-		default: { return (GetVertexPos(1) - GetVertexPos(0)); } break;
-	}
-}
-
-
 void S3DModelPiece::CreateShatterPieces()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -188,7 +166,7 @@ void S3DModelPiece::CreateShatterPiecesVariation(int num)
 void S3DModelPiece::Shatter(float pieceChance, int modelType, int texType, int team, const float3 pos, const float3 speed, const CMatrix44f& m) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	const float2  pieceParams = {float3::max(float3::fabs(maxs), float3::fabs(mins)).Length(), pieceChance};
+	const float2  pieceParams = {float3::max(float3::fabs(aabb.maxs), float3::fabs(aabb.mins)).Length(), pieceChance};
 	const   int2 renderParams = {texType, team};
 
 	projectileHandler.AddFlyingPiece(modelType, this, m, pos, speed, pieceParams, renderParams);
@@ -219,6 +197,30 @@ Transform S3DModelPiece::ComposeTransform(const float3& t, const float3& r, floa
 	return tra;
 }
 
+void S3DModelPiece::SetMinMaxExtends()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	for (const auto& vp : vertices) {
+		aabb.AddPoint(vp.pos);
+	}
+}
+
+
+void S3DModelPiece::SetEmitters()
+{
+	if (vertCount == 0) {
+		emitPos = ZeroVector;
+		emitDir = FwdVector;
+	}
+	else if (vertCount == 1) {
+		emitPos = ZeroVector;
+		emitDir = GetVertexPos(0);
+	}
+	else {
+		emitPos = GetVertexPos(0);
+		emitDir = GetVertexPos(1) - GetVertexPos(0);
+	}
+}
 
 void S3DModelPiece::PostProcessGeometry(uint32_t pieceIndex)
 {

@@ -94,11 +94,7 @@ struct S3DOPiece: public S3DModelPiece
 	}
 
 	void PostProcessGeometry(uint32_t pieceIndex) override;
-
-	float3 GetEmitPos() const override { return emitPos; }
-	float3 GetEmitDir() const override { return emitDir; }
 public:
-	void SetMinMaxExtends();
 	void CalcNormals();
 
 	void GetVertices(const TA3DO::_3DObject* o, const std::vector<unsigned char>& fileBuf);

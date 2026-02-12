@@ -8507,17 +8507,17 @@ static int GetSolidObjectPieceInfoHelper(lua_State* L, const S3DModelPiece& op)
 
 	HSTR_PUSH(L, "min");
 	lua_createtable(L, 3, 0); {
-		lua_pushnumber(L, op.mins.x); lua_rawseti(L, -2, 1);
-		lua_pushnumber(L, op.mins.y); lua_rawseti(L, -2, 2);
-		lua_pushnumber(L, op.mins.z); lua_rawseti(L, -2, 3);
+		lua_pushnumber(L, op.aabb.mins.x); lua_rawseti(L, -2, 1);
+		lua_pushnumber(L, op.aabb.mins.y); lua_rawseti(L, -2, 2);
+		lua_pushnumber(L, op.aabb.mins.z); lua_rawseti(L, -2, 3);
 	}
 	lua_rawset(L, -3);
 
 	HSTR_PUSH(L, "max");
 	lua_createtable(L, 3, 0); {
-		lua_pushnumber(L, op.maxs.x); lua_rawseti(L, -2, 1);
-		lua_pushnumber(L, op.maxs.y); lua_rawseti(L, -2, 2);
-		lua_pushnumber(L, op.maxs.z); lua_rawseti(L, -2, 3);
+		lua_pushnumber(L, op.aabb.maxs.x); lua_rawseti(L, -2, 1);
+		lua_pushnumber(L, op.aabb.maxs.y); lua_rawseti(L, -2, 2);
+		lua_pushnumber(L, op.aabb.maxs.z); lua_rawseti(L, -2, 3);
 	}
 	lua_rawset(L, -3);
 

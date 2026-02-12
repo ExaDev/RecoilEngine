@@ -166,10 +166,10 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 		piece->SetVertexTangents();
 		piece->SetMinMaxExtends();
 
-		model->mins = float3::min(piece->goffset + piece->mins, model->mins);
-		model->maxs = float3::max(piece->goffset + piece->maxs, model->maxs);
+		model->mins = float3::min(piece->goffset + piece->aabb.mins, model->mins);
+		model->maxs = float3::max(piece->goffset + piece->aabb.maxs, model->maxs);
 
-		piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->maxs - piece->mins, (piece->maxs + piece->mins) * 0.5f));
+		piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 	}
 
 	// load children pieces
@@ -181,18 +181,10 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 		piece->children.push_back(childPiece);
 	}
 
+	piece->SetEmitters();
+
 	return piece;
 }
-
-void SS3OPiece::SetMinMaxExtends()
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	for (const SVertexData& v: vertices) {
-		mins = float3::min(mins, v.pos);
-		maxs = float3::max(maxs, v.pos);
-	}
-}
-
 
 void SS3OPiece::Trianglize()
 {
