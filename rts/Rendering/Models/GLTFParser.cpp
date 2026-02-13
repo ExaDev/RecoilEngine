@@ -110,8 +110,7 @@ namespace Impl {
 					} break;
 					case hashString("TANGENT"): {
 						fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec4>(asset, accessor, [&](const auto& val, std::size_t idx) {
-							verts[prevVertSize + idx].sTangent = float3{ val.x(), val.y(), val.z() }.ANormalize();
-							verts[prevVertSize + idx].tTangent = val.w() * verts[prevVertSize + idx].normal.cross(verts[prevVertSize + idx].sTangent).ANormalize();
+							verts[prevVertSize + idx].tangent = float4{ val.x(), val.y(), val.z(), val.w() }.ANormalize();
 						});
 						seenTangents = true;
 					} break;

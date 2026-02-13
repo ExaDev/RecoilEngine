@@ -405,21 +405,21 @@ namespace Impl {
 
 					if (IS_QNAN(aiTangent.x) || IS_QNAN(aiTangent.y) || IS_QNAN(aiTangent.z)) {
 						LOG_SL(LOG_SECTION_PIECE, L_INFO, "Malformed tangent (model->name=\"%s\" meshName=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), mesh->mName.C_Str(), vertexIndex, aiTangent.x, aiTangent.y, aiTangent.z);
-						vertex.sTangent = float3{ 1.0f, 0.0f, 0.0f };
+						vertex.tangent = float4{ 1.0f, 0.0f, 0.0f, 0.0f };
 					}
 					else {
-						vertex.sTangent = (aiVectorToFloat3(aiTangent)).SafeANormalize();
+						vertex.tangent = (aiVectorToFloat3(aiTangent)).SafeANormalize();
 					}
 
 					if (IS_QNAN(aiBitangent.x) || IS_QNAN(aiBitangent.y) || IS_QNAN(aiBitangent.z)) {
 						LOG_SL(LOG_SECTION_PIECE, L_INFO, "Malformed bitangent (model->name=\"%s\" meshName=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), mesh->mName.C_Str(), vertexIndex, aiBitangent.x, aiBitangent.y, aiBitangent.z);
-						vertex.tTangent = vertex.normal.cross(vertex.sTangent);
+						vertex.tangent.w = 1.0f;
 					}
 					else {
-						vertex.tTangent = (aiVectorToFloat3(aiBitangent)).SafeANormalize();
+						const auto B = (aiVectorToFloat3(aiBitangent)).SafeANormalize();
+						const float handednessSign = Sign(B.dot(vertex.normal.cross(vertex.tangent)));
+						vertex.tangent.w = handednessSign;
 					}
-
-					vertex.tTangent *= -1.0f; // LH (assimp) to RH
 				}
 
 				// vertex tex-coords per channel
@@ -431,10 +431,7 @@ namespace Impl {
 					vertex.texCoords[uvChanIndex].y = mesh->mTextureCoords[uvChanIndex][vertexIndex].y;
 				}
 
-				vertex.pos      = (boneTra * float4{ vertex.pos     , 1.0f }).xyz;
-				vertex.normal   = (boneTra * float4{ vertex.normal  , 0.0f }).xyz;
-				vertex.sTangent = (boneTra * float4{ vertex.sTangent, 0.0f }).xyz;
-				vertex.tTangent = (boneTra * float4{ vertex.tTangent, 0.0f }).xyz;
+				vertex.TransformBy(boneTra);
 
 				meshVertexMapping.push_back(verts.size());
 				verts.push_back(vertex);
@@ -882,19 +879,19 @@ void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, cons
 
 				if (IS_QNAN(aiTangent.x) || IS_QNAN(aiTangent.y) || IS_QNAN(aiTangent.z)) {
 					LOG_SL(LOG_SECTION_PIECE, L_INFO, "Malformed tangent (model->name=\"%s\" piece->name=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), piece->name.c_str(), vertexIndex, aiTangent.x, aiTangent.y, aiTangent.z);
-					vertex.sTangent = float3{1.0f, 0.0f, 0.0f};
+					vertex.tangent = float4{ 1.0f, 0.0f, 0.0f, 0.0f };
 				} else {
-					vertex.sTangent = (aiVectorToFloat3(aiTangent)).SafeANormalize();
+					vertex.tangent = (aiVectorToFloat3(aiTangent)).SafeANormalize();
 				}
 
 				if (IS_QNAN(aiBitangent.x) || IS_QNAN(aiBitangent.y) || IS_QNAN(aiBitangent.z)) {
 					LOG_SL(LOG_SECTION_PIECE, L_INFO, "Malformed bitangent (model->name=\"%s\" piece->name=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), piece->name.c_str(), vertexIndex, aiBitangent.x, aiBitangent.y, aiBitangent.z);
-					vertex.tTangent = vertex.normal.cross(vertex.sTangent);
+					vertex.tangent.w = 1.0f;
 				} else {
-					vertex.tTangent = (aiVectorToFloat3(aiBitangent)).SafeANormalize();
+					const auto B = (aiVectorToFloat3(aiBitangent)).SafeANormalize();
+					const float handednessSign = Sign(B.dot(vertex.normal.cross(vertex.tangent)));
+					vertex.tangent.w = handednessSign;
 				}
-
-				vertex.tTangent *= -1.0f; // LH (assimp) to RH
 			}
 
 			// vertex tex-coords per channel

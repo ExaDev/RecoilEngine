@@ -20,26 +20,25 @@ void S3DModelVAO::EnableAttribs(bool inst) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (!inst) {
-		for (int i = 0; i <= 5; ++i) {
+		for (int i = 0; i <= 4; ++i) {
 			glEnableVertexAttribArray(i);
 			glVertexAttribDivisor(i, 0);
 		}
 
 		glVertexAttribPointer (0, 3, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, pos         ));
 		glVertexAttribPointer (1, 3, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, normal      ));
-		glVertexAttribPointer (2, 3, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, sTangent    ));
-		glVertexAttribPointer (3, 3, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, tTangent    ));
-		glVertexAttribPointer (4, 4, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, texCoords[0]));
-		glVertexAttribIPointer(5, 3, GL_UNSIGNED_INT,        sizeof(SVertexData), (const void*)offsetof(SVertexData, boneIDsLow  ));
+		glVertexAttribPointer (2, 4, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, tangent     ));
+		glVertexAttribPointer (3, 4, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, texCoords[0]));
+		glVertexAttribIPointer(4, 3, GL_UNSIGNED_INT,        sizeof(SVertexData), (const void*)offsetof(SVertexData, boneIDsLow  ));
 	}
 	else {
-		for (int i = 6; i <= 6; ++i) {
+		for (int i = 5; i <= 5; ++i) {
 			glEnableVertexAttribArray(i);
 			glVertexAttribDivisor(i, 1);
 		}
 
 		// covers all 4 uints of SInstanceData
-		glVertexAttribIPointer(6, 4, GL_UNSIGNED_INT, sizeof(SInstanceData), (const void*)offsetof(SInstanceData, matOffset));
+		glVertexAttribIPointer(5, 4, GL_UNSIGNED_INT, sizeof(SInstanceData), (const void*)offsetof(SInstanceData, matOffset));
 	}
 }
 
@@ -239,7 +238,7 @@ void S3DModelVAO::BindLegacyVertexAttribsAndVBOs() const
 	glVertexPointer(3, GL_FLOAT, sizeof(SVertexData), vertVBO.GetPtr(offsetof(SVertexData, pos)));
 
 	glEnableClientState(GL_NORMAL_ARRAY);
-	glNormalPointer(GL_FLOAT, sizeof(SVertexData), vertVBO.GetPtr(offsetof(SVertexData, normal)));
+	glNormalPointer(GL_FLOAT   , sizeof(SVertexData), vertVBO.GetPtr(offsetof(SVertexData, normal)));
 
 	glClientActiveTexture(GL_TEXTURE0);
 	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -251,18 +250,12 @@ void S3DModelVAO::BindLegacyVertexAttribsAndVBOs() const
 
 	glClientActiveTexture(GL_TEXTURE5);
 	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-	glTexCoordPointer(3, GL_FLOAT, sizeof(SVertexData), vertVBO.GetPtr(offsetof(SVertexData, sTangent)));
-
-	glClientActiveTexture(GL_TEXTURE6);
-	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
-	glTexCoordPointer(3, GL_FLOAT, sizeof(SVertexData), vertVBO.GetPtr(offsetof(SVertexData, tTangent)));
+	glTexCoordPointer(4, GL_FLOAT, sizeof(SVertexData), vertVBO.GetPtr(offsetof(SVertexData, tangent)));
 }
 
 void S3DModelVAO::UnbindLegacyVertexAttribsAndVBOs() const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	glClientActiveTexture(GL_TEXTURE6);
-	glDisableClientState(GL_TEXTURE_COORD_ARRAY);
 
 	glClientActiveTexture(GL_TEXTURE5);
 	glDisableClientState(GL_TEXTURE_COORD_ARRAY);

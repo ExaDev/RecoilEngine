@@ -140,6 +140,4 @@ protected:
 	std::vector<uint32_t> shatterIndices;
 
 	S3DModel* model = nullptr;
-public:
-	//friend class CAssParser;
 };

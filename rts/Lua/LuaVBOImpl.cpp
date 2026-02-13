@@ -806,7 +806,7 @@ void LuaVBOImpl::UpdateModelsVBOElementCount()
 /*
 	vec3 pos;
 	vec3 normal = UpVector;
-	vec3 sTangent;
+	vec3 tangent;
 	vec3 tTangent;
 
 	// TODO:
@@ -840,30 +840,19 @@ size_t LuaVBOImpl::ModelsVBOImpl()
 			3 * sizeof(float) //strideSizeInBytes
 		};
 
-		// float3 sTangent
+		// float3 tangent
 		this->bufferAttribDefs[2] = {
 			GL_FLOAT, //type
-			3, //size
+			4, //size
 			GL_FALSE, //normalized
-			"sTangent", //name
-			offsetof(SVertexData, sTangent), //pointer
+			"tangent", //name
+			offsetof(SVertexData, tangent), //pointer
 			sizeof(float), //typeSizeInBytes
-			3 * sizeof(float) //strideSizeInBytes
-		};
-
-		// float3 tTangent
-		this->bufferAttribDefs[3] = {
-			GL_FLOAT, //type
-			3, //size
-			GL_FALSE, //normalized
-			"tTangent", //name
-			offsetof(SVertexData, tTangent), //pointer
-			sizeof(float), //typeSizeInBytes
-			3 * sizeof(float) //strideSizeInBytes
+			4 * sizeof(float) //strideSizeInBytes
 		};
 
 		// 2 x float2 texCoords, packed as vec4
-		this->bufferAttribDefs[4] = {
+		this->bufferAttribDefs[3] = {
 			GL_FLOAT, //type
 			4, //size
 			GL_FALSE, //normalized
@@ -874,7 +863,7 @@ size_t LuaVBOImpl::ModelsVBOImpl()
 		};
 
 		// uint32_t pieceIndex
-		this->bufferAttribDefs[5] = {
+		this->bufferAttribDefs[4] = {
 			GL_UNSIGNED_INT, //type
 			3, //size
 			GL_FALSE, //normalized
@@ -884,7 +873,7 @@ size_t LuaVBOImpl::ModelsVBOImpl()
 			3 * sizeof(uint32_t) //strideSizeInBytes
 		};
 
-		this->attributesCount = 6;
+		this->attributesCount = 5;
 		this->elemSizeInBytes = sizeof(SVertexData);
 		this->bufferSizeInBytes = vbo->GetSize();
 		this->elementsCount = S3DModelVAO::GetInstance().GetVertElemCount();

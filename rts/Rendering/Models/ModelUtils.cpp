@@ -398,6 +398,7 @@ void ModelUtils::CalculateTangents(std::vector<SVertexData>& verts, const std::v
 	if (indcs.size() < 3)
 		return;
 
+	std::vector<float3> tTangent(verts.size(), float3{});
 	// set the triangle-level S- and T-tangents
 	for (size_t i = 0, n = indcs.size(); i < n; i += 3) {
 
@@ -439,20 +440,20 @@ void ModelUtils::CalculateTangents(std::vector<SVertexData>& verts, const std::v
 		const auto sdir = ( p10 * tc20.y - p20 * tc10.y) * r;
 		const auto tdir = (-p10 * tc20.x + p20 * tc10.x) * r;
 
-		v0.sTangent += sdir;
-		v1.sTangent += sdir;
-		v2.sTangent += sdir;
+		v0.tangent += sdir;
+		v1.tangent += sdir;
+		v2.tangent += sdir;
 
-		v0.tTangent += tdir;
-		v1.tTangent += tdir;
-		v2.tTangent += tdir;
+		tTangent[v0idx] += tdir;
+		tTangent[v1idx] += tdir;
+		tTangent[v2idx] += tdir;
 	}
 
 	// set the smoothed per-vertex tangents
 	for (size_t i = 0, n = verts.size(); i < n; i++) {
-		float3& N = verts[i].normal;
-		float3& T = verts[i].sTangent;
-		float3& B = verts[i].tTangent; // bi
+		auto& N = verts[i].normal;
+		auto& T = verts[i].tangent;
+		auto& B = tTangent[i];
 
 		N.AssertNaNs(); N.SafeANormalize();
 		T.AssertNaNs();
@@ -463,11 +464,7 @@ void ModelUtils::CalculateTangents(std::vector<SVertexData>& verts, const std::v
 		T.SafeANormalize();
 
 		const float handednessSign = Sign(B.dot(N.cross(T)));
-
-		// Can probably also do Gram-Schmidt: orthogonalize B against N and T
-		//B = (B - N * N.dot(B) - T * T.dot(B));
-		B = N.cross(T) * handednessSign;
-		B.SafeANormalize();
+		T.w = handednessSign;
 	}
 }
 

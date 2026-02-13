@@ -15,8 +15,7 @@ struct SVertexData {
 	SVertexData() {
 		pos = float3{};
 		normal = UpVector;
-		sTangent = RgtVector;
-		tTangent = float3{};
+		tangent = RgtVector;
 		texCoords[0] = float2{};
 		texCoords[1] = float2{};
 		// boneIDs is initialized afterwards
@@ -28,14 +27,13 @@ struct SVertexData {
 		const float3& p,
 		const float3& n,
 		const float3& s,
-		const float3& t,
+		const float4& t,
 		const float2& uv0,
 		const float2& uv1)
 	{
 		pos = p;
 		normal = n;
-		sTangent = s;
-		tTangent = t;
+		tangent = s;
 		texCoords[0] = uv0;
 		texCoords[1] = uv1;
 		// boneIDs is initialized afterwards
@@ -53,8 +51,7 @@ struct SVertexData {
 
 	float3 pos;
 	float3 normal;
-	float3 sTangent;
-	float3 tTangent;
+	float4 tangent;
 	float2 texCoords[NUM_MODEL_UVCHANNS];
 
 	std::array<uint8_t, MAX_BONES_PER_VERTEX> boneIDsLow;
