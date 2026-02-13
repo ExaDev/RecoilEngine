@@ -806,8 +806,7 @@ void LuaVBOImpl::UpdateModelsVBOElementCount()
 /*
 	vec3 pos;
 	vec3 normal = UpVector;
-	vec3 tangent;
-	vec3 tTangent;
+	vec4 tangent; // xyz = tangent, w = handedness sign for bitangent reconstruction
 
 	// TODO:
 	//   with pieceIndex this struct is no longer 64 bytes in size which ATI's prefer

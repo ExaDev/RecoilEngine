@@ -2,12 +2,11 @@
 
 layout (location = 0) in vec3 pos;
 layout (location = 1) in vec3 normal;
-layout (location = 2) in vec3 T;
-layout (location = 3) in vec3 B;
-layout (location = 4) in vec4 uv;
-layout (location = 5) in uvec3 bonesInfo; //boneIDsLow, boneWeights, boneIDsHigh
+layout (location = 2) in vec4 tangent; // xyz = tangent, w = handedness sign for bitangent reconstruction
+layout (location = 3) in vec4 uv;
+layout (location = 4) in uvec3 bonesInfo; //boneIDsLow, boneWeights, boneIDsHigh
 
-layout (location = 6) in uvec4 instData;
+layout (location = 5) in uvec4 instData;
 // u32 matOffset
 // u32 uniOffset
 // u32 {teamIdx, drawFlag, numPiecesH, numPiecesL}, note numPiecesH then numPiecesL
