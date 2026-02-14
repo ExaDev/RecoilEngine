@@ -142,3 +142,20 @@ void S3DModel::UpdatePiecesMinMaxExtents()
 		piece->aabb.AddPoints(piece->GetVerticesVec() | std::views::transform(&SVertexData::pos));
 	}
 }
+
+void S3DModel::CalcModelBounds()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	mins = DEF_MIN_SIZE;
+	maxs = DEF_MAX_SIZE;
+
+	for (const auto* piece : pieceObjects) {
+		if (!piece->HasGeometryData())
+			continue;
+
+		// Transform the piece's local AABB by its bind-pose transform to get model-space bounds
+		const AABB transformedAABB = piece->aabb.CalcTransformed(piece->bposeTransform);
+		mins = float3::min(transformedAABB.mins, mins);
+		maxs = float3::max(transformedAABB.maxs, maxs);
+	}
+}

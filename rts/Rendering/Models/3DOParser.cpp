@@ -389,10 +389,6 @@ S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::
 
 	piece->SetEmitters();
 
-	assert(false);
-	model->mins = float3::min(piece->goffset + piece->aabb.mins, model->mins);
-	model->maxs = float3::max(piece->goffset + piece->aabb.maxs, model->maxs);
-
 	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
 	if (me.OffsetToChildObject > 0)

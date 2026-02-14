@@ -166,9 +166,6 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 		piece->SetVertexTangents();
 		piece->SetMinMaxExtends();
 
-		model->mins = float3::min(piece->goffset + piece->aabb.mins, model->mins);
-		model->maxs = float3::max(piece->goffset + piece->aabb.maxs, model->maxs);
-
 		piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 	}
 

@@ -364,6 +364,7 @@ void CModelLoader::FillModel(
 	assert(model.GetRootPiece() != nullptr);
 
 	model.SetPieceMatrices();
+	model.CalcModelBounds();
 
 	PostProcessGeometry(&model);
 }

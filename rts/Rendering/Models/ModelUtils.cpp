@@ -263,16 +263,11 @@ void Skinning::ReparentCompleteMeshesToBones(S3DModel* model, const std::vector<
 
 void ModelUtils::CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece)
 {
-	// TODO fix
+	// Calculate goffset (global offset from root piece)
+	// Note: goffset only captures translation, not rotation/scale
+	// Model bounds are calculated separately using bposeTransform in S3DModel::CalcModelBounds()
 	const CMatrix44f scaleRotMat = piece->ComposeTransform(ZeroVector, ZeroVector, piece->scale).ToMatrix();
-
-	// cannot set this until parent relations are known, so either here or in BuildPieceHierarchy()
 	piece->goffset = scaleRotMat.Mul(piece->offset) + ((piece->parent != nullptr) ? piece->parent->goffset : ZeroVector);
-
-	// update model min/max extents
-	assert(false); //questionable approach?
-	model->mins = float3::min(piece->goffset + piece->aabb.mins, model->mins);
-	model->maxs = float3::max(piece->goffset + piece->aabb.maxs, model->maxs);
 
 	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
@@ -288,6 +283,7 @@ void ModelUtils::CalculateModelProperties(S3DModel* model, const LuaTable& model
 
 	model->UpdatePiecesMinMaxExtents();
 	CalculateModelDimensions(model, model->GetRootPiece());
+	model->CalcModelBounds();
 
 	model->mins = modelTable.GetFloat3("mins", model->mins);
 	model->maxs = modelTable.GetFloat3("maxs", model->maxs);
@@ -331,6 +327,7 @@ void ModelUtils::ApplyModelProperties(S3DModel* model, const ModelParams& modelP
 
 	model->UpdatePiecesMinMaxExtents();
 	CalculateModelDimensions(model, model->GetRootPiece());
+	model->CalcModelBounds();
 
 	// Note the content from Lua table will overwrite whatever has already been defined in modelParams
 
