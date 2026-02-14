@@ -27,8 +27,7 @@ S3DModel& S3DModel::operator= (S3DModel&& m) noexcept {
 	radius = m.radius;
 	height = m.height;
 
-	mins = m.mins;
-	maxs = m.maxs;
+	aabb = m.aabb;
 	relMidPos = m.relMidPos;
 
 	indxStart = m.indxStart;
@@ -146,16 +145,13 @@ void S3DModel::UpdatePiecesMinMaxExtents()
 void S3DModel::CalcModelBounds()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	mins = DEF_MIN_SIZE;
-	maxs = DEF_MAX_SIZE;
+	aabb.Reset();
 
 	for (const auto* piece : pieceObjects) {
 		if (!piece->HasGeometryData())
 			continue;
 
 		// Transform the piece's local AABB by its bind-pose transform to get model-space bounds
-		const AABB transformedAABB = piece->aabb.CalcTransformed(piece->bposeTransform);
-		mins = float3::min(transformedAABB.mins, mins);
-		maxs = float3::max(transformedAABB.maxs, maxs);
+		aabb.Combine(piece->aabb.CalcTransformed(piece->bposeTransform));
 	}
 }

@@ -382,8 +382,8 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 			file << "\t\tmodelType: " << m.type << "\n";
 			file << "\t\tradius: " << TapFloats(m.radius);
 			file << "\t\theight: " << TapFloats(m.height);
-			file << "\t\tmins: " << TapFloats(m.mins);
-			file << "\t\tmaxs: " << TapFloats(m.maxs);
+			file << "\t\tmins: " << TapFloats(m.aabb.mins);
+			file << "\t\tmaxs: " << TapFloats(m.aabb.maxs);
 			file << "\t\trelMidPos: " << TapFloats(m.relMidPos);
 			file << "\t\tpieceObjects: " << m.pieceObjects.size() << "\n";
 			for (const auto* p : m.pieceObjects) {

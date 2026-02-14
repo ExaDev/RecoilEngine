@@ -64,8 +64,7 @@ void CS3OParser::Load(S3DModel& model, const std::string& name)
 	model.numPieces = 0;
 	model.texs[0] = (header.texture1 == 0)? "" : (char*) &fileBuf[header.texture1];
 	model.texs[1] = (header.texture2 == 0)? "" : (char*) &fileBuf[header.texture2];
-	model.mins = DEF_MIN_SIZE;
-	model.maxs = DEF_MAX_SIZE;
+	model.aabb.Reset();
 
 	textureHandlerS3O.PreloadTexture(
 		&model,

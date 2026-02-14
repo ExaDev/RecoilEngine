@@ -182,8 +182,7 @@ void C3DOParser::Load(S3DModel& model, const std::string& name)
 	model.type = MODELTYPE_3DO;
 	model.textureType = 0;
 	model.numPieces   = 0;
-	model.mins = DEF_MIN_SIZE;
-	model.maxs = DEF_MAX_SIZE;
+	model.aabb.Reset();
 
 	model.FlattenPieceTree(LoadPiece(&model, nullptr, fileBuf, 0));
 

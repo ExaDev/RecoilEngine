@@ -9,6 +9,7 @@
 #include "3DModelDefs.hpp"
 #include "ModelsMemStorage.h"
 #include "System/float3.h"
+#include "System/AABB.hpp"
 
 struct S3DModelPiece;
 
@@ -37,8 +38,6 @@ struct S3DModel
 		, radius(0.0f)
 		, height(0.0f)
 
-		, mins(DEF_MIN_SIZE)
-		, maxs(DEF_MAX_SIZE)
 		, relMidPos(ZeroVector)
 
 		, loadStatus(NOTLOADED)
@@ -72,12 +71,12 @@ struct S3DModel
 	void CalcModelBounds();
 
 	// default values set by parsers; radius is also cached in WorldObject::drawRadius (used by projectiles)
-	float CalcDrawRadius() const { return ((maxs - mins).Length() * 0.5f); }
-	float CalcDrawHeight() const { return (maxs.y - mins.y); }
+	float CalcDrawRadius() const { return aabb.CalcRadius(); }
+	float CalcDrawHeight() const { return (aabb.maxs.y - aabb.mins.y); }
 	float GetDrawRadius() const { return radius; }
 	float GetDrawHeight() const { return height; }
 
-	float3 CalcDrawMidPos() const { return ((maxs + mins) * 0.5f); }
+	float3 CalcDrawMidPos() const { return aabb.CalcCenter(); }
 	float3 GetDrawMidPos() const { return relMidPos; }
 
 	const ScopedTransformMemAlloc& GetTransformAlloc() const { return traAlloc; }
@@ -102,8 +101,7 @@ public:
 	float radius;
 	float height;
 
-	float3 mins;
-	float3 maxs;
+	AABB aabb;
 	float3 relMidPos;
 
 	LoadStatus loadStatus;

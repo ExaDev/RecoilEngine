@@ -285,8 +285,8 @@ void ModelUtils::CalculateModelProperties(S3DModel* model, const LuaTable& model
 	CalculateModelDimensions(model, model->GetRootPiece());
 	model->CalcModelBounds();
 
-	model->mins = modelTable.GetFloat3("mins", model->mins);
-	model->maxs = modelTable.GetFloat3("maxs", model->maxs);
+	model->aabb.mins = modelTable.GetFloat3("mins", model->aabb.mins);
+	model->aabb.maxs = modelTable.GetFloat3("maxs", model->aabb.maxs);
 
 	model->radius = modelTable.GetFloat("radius", model->CalcDrawRadius());
 	model->height = modelTable.GetFloat("height", model->CalcDrawHeight());
@@ -331,8 +331,8 @@ void ModelUtils::ApplyModelProperties(S3DModel* model, const ModelParams& modelP
 
 	// Note the content from Lua table will overwrite whatever has already been defined in modelParams
 
-	model->mins = modelParams.mins.value_or(model->mins);
-	model->maxs = modelParams.maxs.value_or(model->maxs);
+	model->aabb.mins = modelParams.mins.value_or(model->aabb.mins);
+	model->aabb.maxs = modelParams.maxs.value_or(model->aabb.maxs);
 
 	// must come after mins / maxs assignment
 	model->relMidPos = modelParams.relMidPos.value_or(model->CalcDrawMidPos());
@@ -472,7 +472,7 @@ void ModelLog::LogModelProperties(const S3DModel& model)
 	LOG_SL(LOG_SECTION_MODEL, L_DEBUG, "model->numobjects: %d", model.numPieces);
 	LOG_SL(LOG_SECTION_MODEL, L_DEBUG, "model->radius: %f", model.radius);
 	LOG_SL(LOG_SECTION_MODEL, L_DEBUG, "model->height: %f", model.height);
-	LOG_SL(LOG_SECTION_MODEL, L_DEBUG, "model->mins: (%f,%f,%f)", model.mins[0], model.mins[1], model.mins[2]);
-	LOG_SL(LOG_SECTION_MODEL, L_DEBUG, "model->maxs: (%f,%f,%f)", model.maxs[0], model.maxs[1], model.maxs[2]);
+	LOG_SL(LOG_SECTION_MODEL, L_DEBUG, "model->mins: (%f,%f,%f)", model.aabb.mins[0], model.aabb.mins[1], model.aabb.mins[2]);
+	LOG_SL(LOG_SECTION_MODEL, L_DEBUG, "model->maxs: (%f,%f,%f)", model.aabb.maxs[0], model.aabb.maxs[1], model.aabb.maxs[2]);
 	LOG_SL(LOG_SECTION_MODEL, L_INFO, "Model %s Imported.", model.name.c_str());
 }
