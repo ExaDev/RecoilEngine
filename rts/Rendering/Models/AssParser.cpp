@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <numeric>
 #include <optional>
+#include <cstdint>
 
 #include "3DModel.hpp"
 #include "3DModelDefs.hpp"
@@ -40,7 +41,7 @@
 
 // triangulate guarantees the most complex mesh is a triangle
 // sortbytype ensure only 1 type of primitive type per mesh is used
-static constexpr unsigned int ASS_POSTPROCESS_OPTIONS =
+static constexpr uint32_t ASS_POSTPROCESS_OPTIONS =
 	  aiProcess_RemoveComponent
 	| aiProcess_FindInvalidData
 	| aiProcess_CalcTangentSpace
@@ -54,14 +55,14 @@ static constexpr unsigned int ASS_POSTPROCESS_OPTIONS =
 	| aiProcess_SplitLargeMeshes
 	;
 
-static constexpr unsigned int ASS_IMPORTER_OPTIONS =
+static constexpr uint32_t ASS_IMPORTER_OPTIONS =
 	  aiComponent_CAMERAS
 	| aiComponent_LIGHTS
 	| aiComponent_TEXTURES
 	| aiComponent_ANIMATIONS
 	| aiComponent_MATERIALS
 	;
-static constexpr unsigned int ASS_LOGGING_OPTIONS =
+static constexpr uint32_t ASS_LOGGING_OPTIONS =
 	  Assimp::Logger::Debugging
 	| Assimp::Logger::Info
 	| Assimp::Logger::Err
@@ -141,32 +142,7 @@ public:
 
 
 
-struct SPseudoAssPiece {
-	std::string name;
 
-	S3DModelPiece* parent;
-
-	Transform bposeTransform;    /// bind-pose transform, including baked rots
-	std::optional<Transform> bakedTransform;    /// baked local-space rotations
-
-	float3 offset;     /// local (piece-space) offset wrt. parent piece
-	float scale{1.0f}; /// baked uniform scaling factor (assimp-only)
-
-	// copy of S3DModelPiece::SetBakedTransform()
-	void SetBakedTransform(const Transform& tra) {
-		if (tra.IsIdentity())
-			bakedTransform = std::nullopt;
-		else
-			bakedTransform = tra;
-	}
-
-	// copy of S3DModelPiece::ComposeTransform(), unused?
-	Transform ComposeTransform(const float3& t, const float3& r, float s) const;
-
-	// copy of S3DModelPiece::SetPieceTransform()
-	// except there's no need to do it recursively
-	void SetPieceTransform(const Transform& tra);
-};
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace Impl {
@@ -278,57 +254,87 @@ namespace Impl {
 		return meshNames;
 	}
 
-	aiNode* FindNode(const aiScene* scene, aiNode* node, const std::string& name)
-	{
+	const aiNode* FindNodeForMesh(const aiNode* node, uint32_t meshIndex) {
 		RECOIL_DETAILED_TRACY_ZONE;
-		if (std::string(node->mName.C_Str()) == name)
-			return node;
-
-		for (uint32_t ci = 0; ci < node->mNumChildren; ++ci) {
-			auto* childTargetNode = FindNode(scene, node->mChildren[ci], name);
-			if (childTargetNode)
-				return childTargetNode;
+		for (uint32_t i = 0; i < node->mNumMeshes; i++) {
+			if (node->mMeshes[i] == meshIndex) return node;
 		}
-
+		for (uint32_t i = 0; i < node->mNumChildren; i++) {
+			const aiNode* found = FindNodeForMesh(node->mChildren[i], meshIndex);
+			if (found) return found;
+		}
 		return nullptr;
 	}
 
-	aiNode* FindFallbackNode(const aiScene* scene)
-	{
+	CMatrix44f GetMeshModelSpaceMatrix(const aiScene* scene, uint32_t meshIndex) {
 		RECOIL_DETAILED_TRACY_ZONE;
-		for (uint32_t ci = 0; ci < scene->mRootNode->mNumChildren; ++ci) {
-			if (scene->mRootNode->mChildren[ci]->mNumChildren == 0) {
-				return scene->mRootNode->mChildren[ci];
+		const aiNode* node = FindNodeForMesh(scene->mRootNode, meshIndex);
+		aiMatrix4x4 transform; // identity by default
+
+		while (node != nullptr) {
+			transform = node->mTransformation * transform;
+			node = node->mParent;
+		}
+		return aiMatrixToMatrix(transform); // now in model/world space
+	}
+
+	// Pre-compute all node transforms in model space in a single pass
+	// Similar to GLTFParser's GetModelTransforms
+	spring::unordered_map<const aiNode*, Transform> GetNodeTransforms(const aiScene* scene) {
+		RECOIL_DETAILED_TRACY_ZONE;
+		spring::unordered_map<const aiNode*, Transform> transforms;
+
+		// Recursive lambda to compute transforms
+		auto ComputeTransform = [&](this auto&& self, const aiNode* node, const Transform& parentTransform) -> void {
+			aiVector3D aiScaleVec, aiTransVec;
+			aiQuaternion aiRotateQuat;
+			node->mTransformation.Decompose(aiScaleVec, aiRotateQuat, aiTransVec);
+
+			// Create Transform from aiNode's transformation
+			Transform nodeTransform(
+				CQuaternion(aiRotateQuat.x, aiRotateQuat.y, aiRotateQuat.z, aiRotateQuat.w),
+				aiVectorToFloat3(aiTransVec),
+				aiScaleVec.x
+			);
+
+			// Compute model-space transform & store the transform
+			Transform modelSpaceTransform = parentTransform * nodeTransform;
+			transforms.emplace(node, modelSpaceTransform);
+
+			// Recursively process children
+			for (uint32_t i = 0; i < node->mNumChildren; i++) {
+				self(node->mChildren[i], modelSpaceTransform);
 			}
-		}
+		};
 
-		return nullptr;
+		ComputeTransform(scene->mRootNode, Transform{});
+
+		return transforms;
 	}
 
-	std::vector<Transform> GetMeshBoneTransforms(const aiScene* scene, const S3DModel* model, std::vector<SPseudoAssPiece>& meshPPs)
-	{
-		RECOIL_DETAILED_TRACY_ZONE;
-		std::vector<Transform> meshBoneTransform;
-
-		for (auto& meshPP : meshPPs) {
-			meshPP.SetPieceTransform(meshPP.parent->bposeTransform);
-			meshBoneTransform.emplace_back(meshPP.bposeTransform);
-		}
-
-		return meshBoneTransform;
-	}
-
-	std::vector<Skinning::SkinnedMesh> GetModelSpaceMeshes(const aiScene* scene, const S3DModel* model, const std::vector<Transform>& meshBoneTransforms)
+	std::vector<Skinning::SkinnedMesh> GetModelSpaceMeshes(const aiScene* scene, const S3DModel* model)
 	{
 		RECOIL_DETAILED_TRACY_ZONE;
 		std::vector<uint32_t> meshVertexMapping;
 		std::vector<Skinning::SkinnedMesh> meshes;
 
+		// Pre-compute all node transforms in a single pass
+		const auto nodeTransforms = GetNodeTransforms(scene);
+
 		for (uint32_t meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex) {
 			auto& [verts, indcs] = meshes.emplace_back();
 
 			const aiMesh* mesh = scene->mMeshes[meshIndex];
-			const auto& boneTra = meshBoneTransforms[meshIndex];
+
+			// Find the node containing this mesh and get its pre-computed transform
+			const aiNode* meshNode = FindNodeForMesh(scene->mRootNode, meshIndex);
+			Transform boneTra;
+			if (meshNode) {
+				auto it = nodeTransforms.find(meshNode);
+				if (it != nodeTransforms.end()) {
+					boneTra = it->second;
+				}
+			}
 
 			LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Fetching mesh %d from scene", meshIndex);
 			LOG_SL(LOG_SECTION_PIECE, L_DEBUG,
@@ -456,8 +462,8 @@ namespace Impl {
 					continue;
 
 				for (unsigned vertexListID = 0; vertexListID < face.mNumIndices; ++vertexListID) {
-					const unsigned int vertexFaceIdx = face.mIndices[vertexListID];
-					const unsigned int vertexDrawIdx = meshVertexMapping[vertexFaceIdx];
+					const uint32_t vertexFaceIdx = face.mIndices[vertexListID];
+					const uint32_t vertexDrawIdx = meshVertexMapping[vertexFaceIdx];
 					indcs.push_back(vertexDrawIdx);
 				}
 			}
@@ -490,7 +496,7 @@ void CAssParser::Kill()
 
 	// reuse piece innards when reloading
 	// piecePool.clear();
-	for (unsigned int i = 0; i < numPoolPieces; i++) {
+	for (uint32_t i = 0; i < numPoolPieces; i++) {
 		piecePool[i].Clear();
 	}
 
@@ -609,36 +615,7 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 
 	// skinning support - save mesh data directly to model.skinnedMesh
 	if (!meshNames.empty()) {
-		// need matrices earlier than usual
-		model.SetPieceMatrices();
-		std::vector<SPseudoAssPiece> meshPseudoPieces(meshNames.size());
-		auto mppIt = meshPseudoPieces.begin();
-		for (const auto& meshName : meshNames) {
-			aiNode* meshNode = nullptr;
-			meshNode = Impl::FindNode(scene, scene->mRootNode, meshName);
-			mppIt->name = meshName;
-			if (!meshNode) {
-				LOG_SL(LOG_SECTION_MODEL, L_ERROR, "An assimp model has invalid pieces hierarchy. Missing a mesh named: \"%s\" in model[\"%s\"] path: %s. Looking for a likely candidate", meshName.c_str(), modelName.c_str(), modelPath.c_str());
-
-				/* Try to salvage the model since such "invalid" ones can actually be
-				 * produced by industry standard tools (in particular, Blender). */
-				meshNode = Impl::FindFallbackNode(scene);
-				if (meshNode && meshNode->mParent)
-					LOG_SL(LOG_SECTION_MODEL, L_WARNING, "Found a likely replacement candidate for mesh \"%s\" - node \"%s\". It might be incorrect!", meshName.c_str(), meshNode->mName.data);
-				else
-					throw content_error("An assimp model has invalid pieces hierarchy. Failed to find suitable replacement.");
-			}
-
-			std::string const parentName(meshNode->mParent->mName.C_Str());
-			auto* parentPiece = model.FindPiece(parentName);
-			assert(parentPiece);
-			mppIt->parent = parentPiece;
-
-			LoadPieceTransformations(&(*mppIt), &model, meshNode, modelTable);
-			mppIt++;
-		}
-		const auto meshBoneTransforms = Impl::GetMeshBoneTransforms(scene, &model, meshPseudoPieces);
-		const auto meshes = Impl::GetModelSpaceMeshes(scene, &model, meshBoneTransforms);
+		const auto meshes = Impl::GetModelSpaceMeshes(scene, &model);
 
 		// Merge all skinned meshes into model.skinnedMesh
 		for (const auto& mesh : meshes) {
@@ -743,16 +720,7 @@ void CAssParser::LoadPieceTransformations(
 	Impl::LoadPieceTransformations<SAssPiece>(piece, model, pieceNode, pieceTable, optRotation);
 }
 
-void CAssParser::LoadPieceTransformations(
-	SPseudoAssPiece* piece,
-	const S3DModel* model,
-	const aiNode* pieceNode,
-	const LuaTable& pieceTable,
-	const CQuaternion* optRotation
-) {
-	RECOIL_DETAILED_TRACY_ZONE;
-	Impl::LoadPieceTransformations<SPseudoAssPiece>(piece, model, pieceNode, pieceTable, optRotation);
-}
+
 
 void CAssParser::SetPieceName(
 	SAssPiece* piece,
@@ -777,7 +745,7 @@ void CAssParser::SetPieceName(
 	// find a new name if none given or if a piece with the same name already exists
 	ModelPieceMap::const_iterator it = pieceMap.find(piece->name);
 
-	for (unsigned int i = 0; it != pieceMap.end(); i++) {
+	for (uint32_t i = 0; it != pieceMap.end(); i++) {
 		const std::string newPieceName = piece->name + IntToString(i, "%02i");
 
 		if ((it = pieceMap.find(newPieceName)) == pieceMap.end()) {
@@ -827,7 +795,7 @@ void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, cons
 
 	// Get vertex data from node meshes
 	for (unsigned meshListIndex = 0; meshListIndex < pieceNode->mNumMeshes; ++meshListIndex) {
-		const unsigned int meshIndex = pieceNode->mMeshes[meshListIndex];
+		const uint32_t meshIndex = pieceNode->mMeshes[meshListIndex];
 		const aiMesh* mesh = scene->mMeshes[meshIndex];
 
 		LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Fetching mesh %d from scene", meshIndex);
@@ -897,7 +865,7 @@ void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, cons
 			}
 
 			// vertex tex-coords per channel
-			for (unsigned int uvChanIndex = 0; uvChanIndex < SVertexData::NUM_MODEL_UVCHANNS; uvChanIndex++) {
+			for (uint32_t uvChanIndex = 0; uvChanIndex < SVertexData::NUM_MODEL_UVCHANNS; uvChanIndex++) {
 				if (!mesh->HasTextureCoords(uvChanIndex))
 					break;
 
@@ -928,8 +896,8 @@ void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, cons
 				continue;
 
 			for (unsigned vertexListID = 0; vertexListID < face.mNumIndices; ++vertexListID) {
-				const unsigned int vertexFaceIdx = face.mIndices[vertexListID];
-				const unsigned int vertexDrawIdx = meshVertexMapping[vertexFaceIdx];
+				const uint32_t vertexFaceIdx = face.mIndices[vertexListID];
+				const uint32_t vertexDrawIdx = meshVertexMapping[vertexFaceIdx];
 				indcs.push_back(vertexDrawIdx);
 			}
 		}
@@ -1033,7 +1001,7 @@ SAssPiece* CAssParser::LoadPiece(
 	}
 
 	// Recursively process all child pieces
-	for (unsigned int i = 0; i < pieceNode->mNumChildren; ++i) {
+	for (uint32_t i = 0; i < pieceNode->mNumChildren; ++i) {
 		LoadPiece(model, pieceNode->mChildren[i], scene, modelTable, skipList, pieceMap, parentMap);
 	}
 
@@ -1147,7 +1115,7 @@ void CAssParser::FindTextures(
 
 	// 2. gather model-defined textures of first material (medium priority)
 	if (scene->mNumMaterials > 0) {
-		constexpr unsigned int texTypes[] = {
+		constexpr uint32_t texTypes[] = {
 			aiTextureType_SPECULAR,
 			aiTextureType_UNKNOWN,
 			aiTextureType_DIFFUSE,
@@ -1160,7 +1128,7 @@ void CAssParser::FindTextures(
 			aiTextureType_OPACITY,
 			*/
 		};
-		for (unsigned int texType: texTypes) {
+		for (uint32_t texType: texTypes) {
 			aiString textureFile;
 			if (scene->mMaterials[0]->Get(AI_MATKEY_TEXTURE(texType, 0), textureFile) != aiReturn_SUCCESS)
 				continue;
@@ -1175,27 +1143,4 @@ void CAssParser::FindTextures(
 	model->texs[1] = FindTexture(modelTable.GetString("tex2", ""), modelPath, model->texs[1]);
 }
 
-Transform SPseudoAssPiece::ComposeTransform(const float3& t, const float3& r, float s) const
-{
-	// NOTE:
-	//   ORDER MATTERS (T(baked + script) * R(baked) * R(script) * S(baked))
-	//   translating + rotating + scaling is faster than matrix-multiplying
-	//   m is identity so m.SetPos(t)==m.Translate(t) but with fewer instrs
-	Transform tra;
-	tra.t = t;
 
-	if (bakedTransform.has_value())
-		tra *= bakedTransform.value();
-
-	tra *= Transform(CQuaternion::FromEulerYPRNeg(-r), ZeroVector, s);
-	return tra;
-}
-
-void SPseudoAssPiece::SetPieceTransform(const Transform& tra)
-{
-	bposeTransform = tra * Transform{
-		CQuaternion(),
-		offset,
-		scale
-	};
-}

@@ -27,7 +27,7 @@ void ModelUtils::CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece)
 	}
 }
 
-void ModelUtils::CalculateModelProperties(S3DModel* model, const LuaTable& modelTable)
+void ModelUtils::CalculateModelProperties(S3DModel* model, const ModelParams& modelParams)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
@@ -35,13 +35,26 @@ void ModelUtils::CalculateModelProperties(S3DModel* model, const LuaTable& model
 	CalculateModelDimensions(model, model->GetRootPiece());
 	model->CalcModelBounds();
 
-	model->aabb.mins = modelTable.GetFloat3("mins", model->aabb.mins);
-	model->aabb.maxs = modelTable.GetFloat3("maxs", model->aabb.maxs);
+	// Note the content from Lua table will overwrite whatever has already been defined in modelParams
 
-	model->radius = modelTable.GetFloat("radius", model->CalcDrawRadius());
-	model->height = modelTable.GetFloat("height", model->CalcDrawHeight());
+	model->aabb.mins = modelParams.mins.value_or(model->aabb.mins);
+	model->aabb.maxs = modelParams.maxs.value_or(model->aabb.maxs);
 
-	model->relMidPos = modelTable.GetFloat3("midpos", model->CalcDrawMidPos());
+	// must come after mins / maxs assignment
+	model->relMidPos = modelParams.relMidPos.value_or(model->CalcDrawMidPos());
+
+	model->radius = modelParams.radius.value_or(model->CalcDrawRadius());
+	model->height = modelParams.height.value_or(model->CalcDrawHeight());
+}
+
+void ModelUtils::CalculateModelProperties(S3DModel* model, const LuaTable& modelTable)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+
+	ModelParams modelParams;
+	GetModelParams(modelTable, modelParams);
+
+	CalculateModelProperties(model, modelParams);
 }
 
 void ModelUtils::GetModelParams(const LuaTable& modelTable, ModelParams& modelParams)
@@ -69,26 +82,6 @@ void ModelUtils::GetModelParams(const LuaTable& modelTable, ModelParams& modelPa
 	CondGetLuaValue(modelParams.flipTextures, "fliptextures");
 	CondGetLuaValue(modelParams.invertTeamColor, "invertteamcolor");
 	CondGetLuaValue(modelParams.s3oCompat, "s3ocompat");
-}
-
-void ModelUtils::ApplyModelProperties(S3DModel* model, const ModelParams& modelParams)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-
-	model->UpdatePiecesMinMaxExtents();
-	CalculateModelDimensions(model, model->GetRootPiece());
-	model->CalcModelBounds();
-
-	// Note the content from Lua table will overwrite whatever has already been defined in modelParams
-
-	model->aabb.mins = modelParams.mins.value_or(model->aabb.mins);
-	model->aabb.maxs = modelParams.maxs.value_or(model->aabb.maxs);
-
-	// must come after mins / maxs assignment
-	model->relMidPos = modelParams.relMidPos.value_or(model->CalcDrawMidPos());
-
-	model->radius = modelParams.radius.value_or(model->CalcDrawRadius());
-	model->height = modelParams.height.value_or(model->CalcDrawHeight());
 }
 
 void ModelUtils::CalculateNormals(std::vector<SVertexData>& verts, const std::vector<uint32_t>& indcs)

@@ -33,14 +33,14 @@ namespace ModelUtils {
 	// Iterate over the model and calculate its overall dimensions
 	void CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece);
 
-	// Calculate model radius from the min/max extents
-	void CalculateModelProperties(S3DModel* model, const LuaTable& modelTable);
-
 	// Get ModelParams from the modelTable
 	void GetModelParams(const LuaTable& modelTable, ModelParams& modelParams);
 
-	// Apply model properties from modelParams
-	void ApplyModelProperties(S3DModel* model, const ModelParams& modelParams);
+	// Calculate model properties from LuaTable (fills ModelParams and calls overload)
+	void CalculateModelProperties(S3DModel* model, const LuaTable& modelTable);
+
+	// Calculate model properties from ModelParams
+	void CalculateModelProperties(S3DModel* model, const ModelParams& modelParams);
 
 	// Calculate missing normals
 	void CalculateNormals(std::vector<SVertexData>& verts, const std::vector<uint32_t>& indcs);

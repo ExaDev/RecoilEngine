@@ -504,7 +504,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 	}
 
 	// will also calculate pieces / model bounding box
-	ModelUtils::ApplyModelProperties(&model, optionalModelParams);
+	ModelUtils::CalculateModelProperties(&model, optionalModelParams);
 
 	ModelLog::LogModelProperties(model);
 }

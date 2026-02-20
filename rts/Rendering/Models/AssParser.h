@@ -16,7 +16,6 @@
 struct aiNode;
 struct aiScene;
 class LuaTable;
-struct SPseudoAssPiece;
 class CQuaternion;
 
 struct SAssPiece: public S3DModelPiece
@@ -72,13 +71,6 @@ private:
 	);
 	static void LoadPieceTransformations(
 		SAssPiece* piece,
-		const S3DModel* model,
-		const aiNode* pieceNode,
-		const LuaTable& pieceTable,
-		const CQuaternion* optRotation = nullptr
-	);
-	static void LoadPieceTransformations(
-		SPseudoAssPiece* piece,
 		const S3DModel* model,
 		const aiNode* pieceNode,
 		const LuaTable& pieceTable,
