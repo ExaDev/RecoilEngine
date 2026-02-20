@@ -22,13 +22,15 @@ void ModelUtils::CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece)
 	}
 }
 
-void ModelUtils::CalculateModelProperties(S3DModel* model, const ModelParams& modelParams)
+void ModelUtils::CalculateModelProperties(S3DModel* model)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
 	model->UpdatePiecesMinMaxExtents();
 	CalculateModelDimensions(model, model->GetRootPiece());
 	model->CalcModelBounds();
+
+	const auto& modelParams = model->modelParams;
 
 	// Note the content from Lua table will overwrite whatever has already been defined in modelParams
 
@@ -40,16 +42,6 @@ void ModelUtils::CalculateModelProperties(S3DModel* model, const ModelParams& mo
 
 	model->radius = modelParams.radius.value_or(model->CalcDrawRadius());
 	model->height = modelParams.height.value_or(model->CalcDrawHeight());
-}
-
-void ModelUtils::CalculateModelProperties(S3DModel* model, const LuaTable& modelTable)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-
-	ModelParams modelParams;
-	GetModelParams(modelTable, modelParams);
-
-	CalculateModelProperties(model, modelParams);
 }
 
 void ModelUtils::GetModelParams(const LuaTable& modelTable, ModelParams& modelParams)

@@ -107,7 +107,7 @@ private:
 private:
 	unsigned int maxIndices = 0;
 	unsigned int maxVertices = 0;
-	unsigned int numPoolPieces = 0;
+	uint32_t numPoolPieces = 0;
 
 	std::vector<SAssPiece> piecePool;
 	spring::mutex poolMutex;

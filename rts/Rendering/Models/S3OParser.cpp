@@ -39,18 +39,8 @@ void CS3OParser::Kill() {
 void CS3OParser::Load(S3DModel& model, const std::string& name)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	CFileHandler file(name);
-	std::vector<uint8_t> fileBuf;
 
-	if (!file.FileExists())
-		throw content_error("[S3OParser] could not find model-file " + name);
-
-	if (!file.IsBuffered()) {
-		fileBuf.resize(file.FileSize(), 0);
-		file.Read(fileBuf.data(), fileBuf.size());
-	} else {
-		fileBuf = std::move(file.GetBuffer());
-	}
+	auto fileBuf = LoadFromFile(name);
 
 	if (fileBuf.size() < sizeof(S3OHeader))
 		throw content_error("[S3OParser] corrupted header for model-file " + name);
@@ -76,9 +66,13 @@ void CS3OParser::Load(S3DModel& model, const std::string& name)
 	model.SetPieceMatrices();
 
 	// set after the extrema are known
-	model.radius = (header.radius <= 0.01f)? model.CalcDrawRadius(): header.radius;
-	model.height = (header.height <= 0.01f)? model.CalcDrawHeight(): header.height;
-	model.relMidPos = float3(header.midx, header.midy, header.midz);
+	if (header.radius > 0.01f)
+		model.modelParams.radius = header.radius;
+
+	if (header.height > 0.01f)
+		model.modelParams.height = header.height;
+
+	model.modelParams.relMidPos = float3(header.midx, header.midy, header.midz);
 }
 
 

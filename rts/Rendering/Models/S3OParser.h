@@ -69,7 +69,7 @@ private:
 	std::vector<SS3OPiece> piecePool;
 	spring::mutex poolMutex;
 
-	unsigned int numPoolPieces = 0;
+	uint32_t numPoolPieces = 0;
 };
 
 #endif /* S3O_PARSER_H */

@@ -17,9 +17,11 @@ class IModelParser
 {
 public:
 	virtual ~IModelParser() = default;
-	virtual void Init() {}
-	virtual void Kill() {}
+	virtual void Init() = 0;
+	virtual void Kill() = 0;
 	virtual void Load(S3DModel& model, const std::string& name) = 0;
+protected:
+	std::vector<uint8_t> LoadFromFile(const std::string& fileName);
 };
 
 

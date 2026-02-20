@@ -62,10 +62,10 @@ struct S3DOPiece: public S3DModelPiece
 {
 	S3DOPiece() = default;
 	S3DOPiece(const S3DOPiece&) = delete;
-	S3DOPiece(S3DOPiece&& p) { *this = std::move(p); }
+	S3DOPiece(S3DOPiece&& p) noexcept { *this = std::move(p); }
 
 	S3DOPiece& operator = (const S3DOPiece& p) = delete;
-	S3DOPiece& operator = (S3DOPiece&& p) {
+	S3DOPiece& operator = (S3DOPiece&& p) noexcept {
 		#if 0
 		// piece is never actually moved, just need the operator for pool
 		emitPos = p.emitPos;
@@ -145,7 +145,7 @@ private:
 	std::vector<S3DOPiece> piecePool;
 	spring::mutex poolMutex;
 
-	unsigned int numPoolPieces = 0;
+	uint32_t numPoolPieces = 0;
 };
 
 #endif // SPRING_3DOPARSER_H

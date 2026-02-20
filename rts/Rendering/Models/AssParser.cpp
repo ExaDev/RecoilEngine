@@ -605,9 +605,6 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 	// Update piece hierarchy based on metadata
 	BuildPieceHierarchy(&model, pieceMap, parentMap);
 
-	// Transform the piece vertices / indices to skins
-	ModelUtils::TransferPiecesToSkinnedMesh(&model);
-
 	// skinning support - save mesh data directly to model.skinnedMesh
 	if (!meshNames.empty()) {
 		const auto meshes = Impl::GetModelSpaceMeshes(scene, &model);
@@ -621,10 +618,6 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 			}
 		}
 	}
-
-	ModelUtils::CalculateModelProperties(&model, modelTable);
-
-	ModelLog::LogModelProperties(model);
 }
 
 

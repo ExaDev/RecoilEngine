@@ -110,6 +110,8 @@ public:
 
 	// Skinned mesh data (for models with bone-based skinning)
 	Skinning::SkinnedMesh skinnedMesh;
+	// needs to be stored so it can be processed after the model is loaded
+	ModelUtils::ModelParams modelParams;
 private:
 	ScopedTransformMemAlloc traAlloc;
 };

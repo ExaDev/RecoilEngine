@@ -361,6 +361,13 @@ void CModelLoader::FillModel(
 ) {
 	ParseModel(model, name, path);
 
+	// Transform the piece vertices / indices to skins
+	ModelUtils::TransferPiecesToSkinnedMesh(&model);
+
+	// will also calculate pieces / model bounding box
+	ModelUtils::CalculateModelProperties(&model);
+	ModelLog::LogModelProperties(model);
+
 	assert(model.numPieces != 0);
 	assert(model.GetRootPiece() != nullptr);
 
@@ -420,7 +427,6 @@ void CModelLoader::ParseModel(S3DModel& model, const std::string& name, const st
 			LoadDummyModel(model);
 			throw content_error(fmt::sprintf("A model has too many pieces (>%u): %s", MAX_PIECES_PER_MODEL, path));
 		}
-
 	} catch (const content_error& ex) {
 		auto lock = CModelsLock::GetScopedLock();
 		LoadDummyModel(model);
@@ -491,3 +497,22 @@ void CModelLoader::Upload(S3DModel* model) const {
 	model->uploaded = true;
 }
 
+std::vector<uint8_t> IModelParser::LoadFromFile(const std::string& fileName)
+{
+	CFileHandler file(fileName);
+	std::vector<uint8_t> fileBuf;
+
+	if (!file.FileExists())
+		throw content_error("[IModelParser] could not find model-file " + fileName);
+
+	if (!file.IsBuffered()) {
+		fileBuf.resize(file.FileSize(), 0);
+		if (file.Read(fileBuf.data(), fileBuf.size()) == 0)
+			throw content_error("[IModelParser] failed to read model-file " + fileName);
+	}
+	else {
+		fileBuf = std::move(file.GetBuffer());
+	}
+
+	return fileBuf;
+}

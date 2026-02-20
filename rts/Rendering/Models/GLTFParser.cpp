@@ -337,6 +337,25 @@ namespace Impl {
 	}
 }
 
+void CGLTFParser::Init()
+{
+	numPoolPieces = 0;
+}
+
+void CGLTFParser::Kill()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	LOG_L(L_INFO, "[CGLTFParser::%s] allocated %u pieces", __func__, numPoolPieces);
+
+	// reuse piece innards when reloading
+	// piecePool.clear();
+	for (uint32_t i = 0; i < numPoolPieces; i++) {
+		piecePool[i].Clear();
+	}
+
+	numPoolPieces = 0;
+}
+
 void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -384,9 +403,8 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 
 	fastgltf::Parser parser;
 
-	ModelUtils::ModelParams optionalModelParams;
 	parser.setExtrasParseCallback(&Impl::ParseSceneExtra);
-	parser.setUserPointer(&optionalModelParams);
+	parser.setUserPointer(&model.modelParams);
 
 	auto maybeGltf = parser.loadGltf(gltfFile.get(), modelPath, PARSER_OPTION, PARSER_CATEGORIES);
 	if (auto error = maybeGltf.error(); error != fastgltf::Error::None) {
@@ -423,17 +441,18 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 		LOG_SL(LOG_SECTION_MODEL, L_INFO, "No valid model metadata in '%s' or no meta-file", metaFileName.c_str());
 	}
 
+	auto& modelParams = model.modelParams;
 	// optionalModelParams will contain all non-empty data from the modelTable
-	ModelUtils::GetModelParams(modelTable, optionalModelParams);
+	ModelUtils::GetModelParams(modelTable, modelParams);
 
 	// Load textures
-	Impl::FindTextures(&model, asset, modelName, optionalModelParams);
+	Impl::FindTextures(&model, asset, modelName, modelParams);
 	LOG_SL(LOG_SECTION_MODEL, L_INFO, "Loading textures. Tex1: '%s' Tex2: '%s'", model.texs[0].c_str(), model.texs[1].c_str());
 
 	textureHandlerS3O.PreloadTexture(
 		&model,
-		optionalModelParams.flipTextures.value_or(false),
-		optionalModelParams.invertTeamColor.value_or(false)
+		modelParams.flipTextures.value_or(false),
+		modelParams.invertTeamColor.value_or(false)
 	);
 
 	model.name = modelFilePath;
@@ -442,7 +461,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 	model.aabb.Reset();
 
 	// GLTF model MUST be exported with Z axis UP. We will rotate it here by ourselves
-	const auto initTransform = (optionalModelParams.s3oCompat.value_or(false)) ?
+	const auto initTransform = (modelParams.s3oCompat.value_or(false)) ?
 		Transform(CQuaternion(0, -math::HALFSQRT2, -math::HALFSQRT2, 0)): // Rotate so xyz ==> (-x,z, y)
 		Transform(CQuaternion( math::HALFSQRT2, 0, 0, -math::HALFSQRT2)); // Rotate so xyz ==> ( x,z,-y)
 
@@ -500,14 +519,6 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 
 		Impl::ReplaceNodeIndexWithPieceIndex(piece->GetVerticesVec(), nodeIdxToPieceIdx);
 	}
-
-	// Transform the piece vertices / indices to skins
-	ModelUtils::TransferPiecesToSkinnedMesh(&model);
-
-	// will also calculate pieces / model bounding box
-	ModelUtils::CalculateModelProperties(&model, optionalModelParams);
-
-	ModelLog::LogModelProperties(model);
 }
 
 GLTFPiece* CGLTFParser::AllocPiece()

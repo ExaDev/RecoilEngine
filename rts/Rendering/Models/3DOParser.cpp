@@ -54,8 +54,8 @@ static std::string GET_TEXT(int pos, const std::vector<unsigned char>& fileBuf, 
 static void READ_3DOBJECT(TA3DO::_3DObject& o, const std::vector<unsigned char>& fileBuf, int& curOffset)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	unsigned int __tmp;
-	unsigned short __isize = sizeof(unsigned int);
+	uint32_t __tmp;
+	unsigned short __isize = sizeof(uint32_t);
 	STREAM_READ(&__tmp,__isize, fileBuf, curOffset);
 	o.VersionSignature = (int)swabDWord(__tmp);
 	STREAM_READ(&__tmp,__isize, fileBuf, curOffset);
@@ -88,8 +88,8 @@ static void READ_3DOBJECT(TA3DO::_3DObject& o, const std::vector<unsigned char>&
 static void READ_VERTEX(float3& v, const std::vector<unsigned char>& fileBuf, int& curOffset)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	unsigned int __tmp;
-	unsigned short __isize = sizeof(unsigned int);
+	uint32_t __tmp;
+	unsigned short __isize = sizeof(uint32_t);
 	STREAM_READ(&__tmp,__isize, fileBuf, curOffset);
 	v.x = (int)swabDWord(__tmp);
 	STREAM_READ(&__tmp,__isize, fileBuf, curOffset);
@@ -102,8 +102,8 @@ static void READ_VERTEX(float3& v, const std::vector<unsigned char>& fileBuf, in
 static void READ_PRIMITIVE(TA3DO::_Primitive& p, const std::vector<unsigned char>& fileBuf, int& curOffset)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	unsigned int __tmp;
-	unsigned short __isize = sizeof(unsigned int);
+	uint32_t __tmp;
+	unsigned short __isize = sizeof(uint32_t);
 	STREAM_READ(&__tmp,__isize, fileBuf, curOffset);
 	p.PaletteEntry = (int)swabDWord(__tmp);
 	STREAM_READ(&__tmp,__isize, fileBuf, curOffset);
@@ -151,7 +151,7 @@ void C3DOParser::Kill()
 
 	// reuse piece innards when reloading
 	// piecePool.clear();
-	for (unsigned int i = 0; i < numPoolPieces; i++) {
+	for (uint32_t i = 0; i < numPoolPieces; i++) {
 		piecePool[i].Clear();
 	}
 
@@ -162,21 +162,8 @@ void C3DOParser::Kill()
 void C3DOParser::Load(S3DModel& model, const std::string& name)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	CFileHandler file(name);
-	std::vector<uint8_t> fileBuf;
 
-	if (!file.FileExists())
-		throw content_error("[3DOParser] could not find model-file " + name);
-
-	if (!file.IsBuffered()) {
-		fileBuf.resize(file.FileSize(), 0);
-
-		if (file.Read(fileBuf.data(), fileBuf.size()) == 0)
-			throw content_error("[3DOParser] failed to read model-file " + name);
-	} else {
-		fileBuf = std::move(file.GetBuffer());
-	}
-
+	auto fileBuf = LoadFromFile(name);
 
 	model.name = name;
 	model.type = MODELTYPE_3DO;
@@ -186,11 +173,6 @@ void C3DOParser::Load(S3DModel& model, const std::string& name)
 
 	model.FlattenPieceTree(LoadPiece(&model, nullptr, fileBuf, 0));
 	model.SetPieceMatrices();
-
-	// set after the extrema are known
-	model.radius = model.CalcDrawRadius();
-	model.height = model.CalcDrawHeight();
-	model.relMidPos = model.CalcDrawMidPos();
 }
 
 

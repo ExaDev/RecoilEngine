@@ -36,11 +36,8 @@ namespace ModelUtils {
 	// Get ModelParams from the modelTable
 	void GetModelParams(const LuaTable& modelTable, ModelParams& modelParams);
 
-	// Calculate model properties from LuaTable (fills ModelParams and calls overload)
-	void CalculateModelProperties(S3DModel* model, const LuaTable& modelTable);
-
 	// Calculate model properties from ModelParams
-	void CalculateModelProperties(S3DModel* model, const ModelParams& modelParams);
+	void CalculateModelProperties(S3DModel* model);
 
 	// Calculate missing normals
 	void CalculateNormals(std::vector<SVertexData>& verts, const std::vector<uint32_t>& indcs);
