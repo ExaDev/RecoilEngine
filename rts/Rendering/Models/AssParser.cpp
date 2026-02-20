@@ -1088,6 +1088,7 @@ void CAssParser::BuildPieceHierarchy(S3DModel* model, ModelPieceMap& pieceMap, c
 	}
 
 	model->FlattenPieceTree(model->GetRootPiece());
+	model->SetPieceMatrices();
 }
 
 static std::string FindTexture(std::string testTextureFile, const std::string& modelPath, const std::string& fallback)

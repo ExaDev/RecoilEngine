@@ -185,6 +185,7 @@ void C3DOParser::Load(S3DModel& model, const std::string& name)
 	model.aabb.Reset();
 
 	model.FlattenPieceTree(LoadPiece(&model, nullptr, fileBuf, 0));
+	model.SetPieceMatrices();
 
 	// set after the extrema are known
 	model.radius = model.CalcDrawRadius();

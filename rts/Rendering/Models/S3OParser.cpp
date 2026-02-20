@@ -73,6 +73,7 @@ void CS3OParser::Load(S3DModel& model, const std::string& name)
 	);
 
 	model.FlattenPieceTree(LoadPiece(&model, nullptr, fileBuf, header.rootPiece));
+	model.SetPieceMatrices();
 
 	// set after the extrema are known
 	model.radius = (header.radius <= 0.01f)? model.CalcDrawRadius(): header.radius;

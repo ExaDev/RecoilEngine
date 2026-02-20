@@ -102,6 +102,7 @@ static void LoadDummyModel(S3DModel& model)
 	// give it one empty piece
 	model.AddPiece(g3DOParser.AllocPiece());
 	model.FlattenPieceTree(model.GetRootPiece()); //useless except for setting up traAlloc
+	model.SetPieceMatrices();
 	model.GetRootPiece()->SetCollisionVolume(CollisionVolume('b', 'z', -UpVector, ZeroVector));
 	model.loadStatus = S3DModel::LoadStatus::LOADED;
 }
@@ -363,7 +364,6 @@ void CModelLoader::FillModel(
 	assert(model.numPieces != 0);
 	assert(model.GetRootPiece() != nullptr);
 
-	model.SetPieceMatrices();
 	model.CalcModelBounds();
 
 	PostProcessGeometry(&model);

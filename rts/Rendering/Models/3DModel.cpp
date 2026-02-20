@@ -138,6 +138,7 @@ void S3DModel::UpdatePiecesMinMaxExtents()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	for (auto* piece : pieceObjects) {
+		piece->aabb.Reset();
 		piece->aabb.AddPoints(piece->GetVerticesVec() | std::views::transform(&SVertexData::pos));
 	}
 }
