@@ -8,6 +8,7 @@
 
 #include "3DModelDefs.hpp"
 #include "ModelsMemStorage.h"
+#include "ModelUtils.h"
 #include "System/float3.h"
 #include "System/AABB.hpp"
 
@@ -106,6 +107,9 @@ public:
 
 	LoadStatus loadStatus;
 	bool uploaded;
+
+	// Skinned mesh data (for models with bone-based skinning)
+	Skinning::SkinnedMesh skinnedMesh;
 private:
 	ScopedTransformMemAlloc traAlloc;
 };

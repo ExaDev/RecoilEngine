@@ -202,15 +202,16 @@ namespace Impl {
 	template<typename UM>
 	void ReplaceNodeIndexWithPieceIndex(std::vector<SVertexData>& verts, const UM& nodeIdxToPieceIdx) {
 		for (auto& vert : verts) {
-			for (size_t wi = 0; wi < vert.boneIDsLow.size(); ++wi) {
+			for (size_t wi = 0; wi < SVertexData::MAX_BONES_PER_VERTEX; ++wi) {
 				const auto nodeIdx = Skinning::GetBoneID(vert, wi);
 				if (nodeIdx == INV_PIECE_NUM)
 					continue;
 
 				const auto pIt = nodeIdxToPieceIdx.find(nodeIdx);
 				assert(pIt != nodeIdxToPieceIdx.end());
-				vert.boneIDsLow [wi] = static_cast<uint8_t>((pIt->second >> 0) & 0xFF);
-				vert.boneIDsHigh[wi] = static_cast<uint8_t>((pIt->second >> 8) & 0xFF);
+
+				// Update individual bone ID
+				vert.boneIDs[wi] = static_cast<uint16_t>(pIt->second);
 			}
 		}
 	}
@@ -465,8 +466,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 	// except this one doesn't ignore nodes with skinned meshes
 	const auto modelTransforms = Impl::GetModelTransforms(asset, defaultSceneIdx, initTransform);
 
-	std::vector<Skinning::SkinnedMesh> allSkinnedMeshes;
-
+	// Collect skinned mesh data directly into model.skinnedMesh
 	for (size_t ni = 0; ni < asset.nodes.size(); ++ni) {
 		const auto& node = asset.nodes[ni];
 		if (!node.meshIndex.has_value())
@@ -477,15 +477,21 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 
 		const auto& skin = asset.skins[*node.skinIndex];
 		const auto& mesh = asset.meshes[*node.meshIndex];
-		auto& skinnedMesh = allSkinnedMeshes.emplace_back();
 
-		Impl::ReadGeometryData(asset, mesh.primitives, skinnedMesh.verts, skinnedMesh.indcs, ni, &skin);
-		Impl::TransformSkinsToModelSpace(skinnedMesh.verts, ni, modelTransforms);
-		Impl::ReplaceNodeIndexWithPieceIndex(skinnedMesh.verts, nodeIdxToPieceIdx);
+		// Append vertices and indices to model's skinned mesh
+		const auto vertOffset = model.skinnedMesh.verts.size();
+		Impl::ReadGeometryData(asset, mesh.primitives, model.skinnedMesh.verts, model.skinnedMesh.indcs, ni, &skin);
+		Impl::TransformSkinsToModelSpace(model.skinnedMesh.verts, ni, modelTransforms);
+		Impl::ReplaceNodeIndexWithPieceIndex(model.skinnedMesh.verts, nodeIdxToPieceIdx);
+
+		// Adjust indices for the appended vertices
+		for (size_t i = vertOffset; i < model.skinnedMesh.indcs.size(); ++i) {
+			model.skinnedMesh.indcs[i] += vertOffset;
+		}
 	}
 
 	// non-skinning case
-	if (allSkinnedMeshes.empty()) {
+	if (model.skinnedMesh.verts.empty()) {
 		for (size_t pi = 0; pi < model.pieceObjects.size(); ++pi) {
 			auto* piece = static_cast<GLTFPiece*>(model.pieceObjects[pi]);
 			if (piece->nodeIndex == GLTFPiece::INVALID_NODE_INDEX)
@@ -496,25 +502,6 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 
 			Impl::ReplaceNodeIndexWithPieceIndex(piece->GetVerticesVec(), nodeIdxToPieceIdx);
 		}
-	}
-
-	spring::unordered_set<size_t> allBones;
-	for (const auto& skin : asset.skins) {
-		for (size_t ji = 0; ji < skin.joints.size(); ++ji) {
-			allBones.emplace(skin.joints[ji]);
-		}
-	}
-
-	if (!allSkinnedMeshes.empty()) {
-		// Skinning::<> code below needs correct bposeTransforms
-		model.SetPieceMatrices();
-
-		// if numMeshes >= numBones reparent the whole meshes
-		// else reparent meshes per-triangle
-		if (allSkinnedMeshes.size() >= allBones.size())
-			Skinning::ReparentCompleteMeshesToBones(&model, allSkinnedMeshes);
-		else
-			Skinning::ReparentMeshesTrianglesToBones(&model, allSkinnedMeshes);
 	}
 
 	// will also calculate pieces / model bounding box

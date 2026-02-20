@@ -4,7 +4,7 @@ layout (location = 0) in vec3 pos;
 layout (location = 1) in vec3 normal;
 layout (location = 2) in vec4 tangent; // xyz = tangent, w = handedness sign for bitangent reconstruction
 layout (location = 3) in vec4 uv;
-layout (location = 4) in uvec3 bonesInfo; //boneIDsLow, boneWeights, boneIDsHigh
+layout (location = 4) in uvec3 bonesInfo; //boneID0|boneID1, boneID2|boneID3, boneWeights
 
 layout (location = 5) in uvec4 instData;
 // u32 matOffset
@@ -250,13 +250,13 @@ void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
 	vec4 normal4 = vec4(normal, 0.0);
 
 	vec4 weights = vec4(
-		float(GetUnpackedValue(bonesInfo.y, 0u)) / 255.0,
-		float(GetUnpackedValue(bonesInfo.y, 1u)) / 255.0,
-		float(GetUnpackedValue(bonesInfo.y, 2u)) / 255.0,
-		float(GetUnpackedValue(bonesInfo.y, 3u)) / 255.0
+		float(GetUnpackedValue(bonesInfo.z, 0u)) / 255.0,
+		float(GetUnpackedValue(bonesInfo.z, 1u)) / 255.0,
+		float(GetUnpackedValue(bonesInfo.z, 2u)) / 255.0,
+		float(GetUnpackedValue(bonesInfo.z, 3u)) / 255.0
 	);
 
-	uint bID0 = GetUnpackedValue(bonesInfo.x, 0u) + (GetUnpackedValue(bonesInfo.z, 0u) << 8u); //first boneID
+	uint bID0 = bonesInfo.x & 0xFFFFu; //first boneID (packed in lower 16 bits)
 	
 	// do interpolation
 	Transform tx = Lerp(
@@ -283,8 +283,14 @@ void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
 	Transform bposeTra = transforms[instData.w + bID0];
 
 	// Vertex[ModelSpace,BoneX] = PieceMat[BoneX] * InverseBindPosMat[BoneX] * BindPosMat[Bone0] * Vertex[Bone0]
-	for (uint bi = 1; bi < 3; ++bi) {
-		uint bID = GetUnpackedValue(bonesInfo.x, bi) + (GetUnpackedValue(bonesInfo.z, bi) << 8u);
+	for (uint bi = 1; bi < 4; ++bi) {
+		uint bID;
+		if (bi == 1)
+			bID = bonesInfo.x >> 16; // boneID1 in upper 16 bits
+		else if (bi == 2)
+			bID = bonesInfo.y & 0xFFFFu; // boneID2 in lower 16 bits
+		else
+			bID = bonesInfo.y >> 16; // boneID3 in upper 16 bits
 
 		if (bID == 0xFFFFu || weights[bi] == 0.0)
 			continue;

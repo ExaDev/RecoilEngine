@@ -867,7 +867,7 @@ size_t LuaVBOImpl::ModelsVBOImpl()
 			3, //size
 			GL_FALSE, //normalized
 			"bonesInfo", //name
-			offsetof(SVertexData, boneIDsLow), //pointer
+			offsetof(SVertexData, boneIDs), //pointer
 			sizeof(uint32_t), //typeSizeInBytes
 			3 * sizeof(uint32_t) //strideSizeInBytes
 		};

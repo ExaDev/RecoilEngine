@@ -230,9 +230,9 @@ void S3DModelPiece::PostProcessGeometry(uint32_t pieceIndex)
 
 
 	for (auto& v : vertices) {
-		if (v.boneIDsLow == SVertexData::DEFAULT_BONEIDS_LOW && v.boneIDsHigh == SVertexData::DEFAULT_BONEIDS_HIGH) {
-			v.boneIDsLow [0] = static_cast<uint8_t>((pieceIndex     ) & 0xFF);
-			v.boneIDsHigh[0] = static_cast<uint8_t>((pieceIndex >> 8) & 0xFF);
+		if (v.boneIDs == SVertexData::DEFAULT_BONEIDS) {
+			// Assign pieceIndex to first bone ID
+			v.boneIDs[0] = static_cast<uint16_t>(pieceIndex);
 		}
 	}
 }

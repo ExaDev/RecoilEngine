@@ -29,7 +29,7 @@ void S3DModelVAO::EnableAttribs(bool inst) const
 		glVertexAttribPointer (1, 3, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, normal      ));
 		glVertexAttribPointer (2, 4, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, tangent     ));
 		glVertexAttribPointer (3, 4, GL_FLOAT       , false, sizeof(SVertexData), (const void*)offsetof(SVertexData, texCoords[0]));
-		glVertexAttribIPointer(4, 3, GL_UNSIGNED_INT,        sizeof(SVertexData), (const void*)offsetof(SVertexData, boneIDsLow  ));
+		glVertexAttribIPointer(4, 3, GL_UNSIGNED_INT,        sizeof(SVertexData), (const void*)offsetof(SVertexData, boneIDs  ));
 	}
 	else {
 		for (int i = 5; i <= 5; ++i) {

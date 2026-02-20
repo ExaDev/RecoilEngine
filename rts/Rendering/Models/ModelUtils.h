@@ -17,9 +17,6 @@ namespace Skinning {
 	};
 
 	uint16_t GetBoneID(const SVertexData& vert, size_t wi);
-
-	void ReparentMeshesTrianglesToBones(S3DModel* model, const std::vector<SkinnedMesh>& meshes);
-	void ReparentCompleteMeshesToBones (S3DModel* model, const std::vector<SkinnedMesh>& meshes);
 };
 
 namespace ModelUtils {

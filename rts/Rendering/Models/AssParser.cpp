@@ -607,7 +607,7 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 	// Update piece hierarchy based on metadata
 	BuildPieceHierarchy(&model, pieceMap, parentMap);
 
-	// skinning support
+	// skinning support - save mesh data directly to model.skinnedMesh
 	if (!meshNames.empty()) {
 		// need matrices earlier than usual
 		model.SetPieceMatrices();
@@ -640,12 +640,14 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 		const auto meshBoneTransforms = Impl::GetMeshBoneTransforms(scene, &model, meshPseudoPieces);
 		const auto meshes = Impl::GetModelSpaceMeshes(scene, &model, meshBoneTransforms);
 
-		// if numMeshes >= numBones reparent the whole meshes
-		// else reparent meshes per-triangle
-		if (meshNames.size() >= boneNames.size())
-			Skinning::ReparentCompleteMeshesToBones(&model, meshes);
-		else
-			Skinning::ReparentMeshesTrianglesToBones(&model, meshes);
+		// Merge all skinned meshes into model.skinnedMesh
+		for (const auto& mesh : meshes) {
+			const auto vertOffset = model.skinnedMesh.verts.size();
+			model.skinnedMesh.verts.insert(model.skinnedMesh.verts.end(), mesh.verts.begin(), mesh.verts.end());
+			for (const auto& indx : mesh.indcs) {
+				model.skinnedMesh.indcs.push_back(static_cast<uint32_t>(vertOffset + indx));
+			}
+		}
 	}
 
 	ModelUtils::CalculateModelProperties(&model, modelTable);
