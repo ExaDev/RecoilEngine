@@ -379,12 +379,14 @@ S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::
 	piece->offset.x =  me.XFromParent * SCALE_FACTOR_3DO;
 	piece->offset.y =  me.YFromParent * SCALE_FACTOR_3DO;
 	piece->offset.z = -me.ZFromParent * SCALE_FACTOR_3DO;
-	piece->goffset = piece->offset + ((parent != nullptr)? parent->goffset: ZeroVector);
+	piece->SetGOffset();
 
 	piece->GetVertices(&me, buf);
 	piece->GetPrimitives(model, me.OffsetToPrimitiveArray, me.NumberOfPrimitives, ((pos == 0)? me.SelectionPrimitive: -1), buf, teamTextures);
 
 	piece->CalcNormals();
+	piece->Trianglize();
+	ModelUtils::CalculateTangents(piece->GetVerticesVec(), piece->GetIndicesVec());
 	piece->SetMinMaxExtends();
 
 	piece->SetEmitters();
@@ -401,10 +403,9 @@ S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::
 }
 
 
-void S3DOPiece::PostProcessGeometry(uint32_t pieceIndex)
+void S3DOPiece::Trianglize()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	// cannot use HasGeometryData because vboIndices is still empty
 	if (prims.empty())
 		return;
 
@@ -448,8 +449,6 @@ void S3DOPiece::PostProcessGeometry(uint32_t pieceIndex)
 			}
 		}
 	}
-
-	S3DModelPiece::PostProcessGeometry(pieceIndex);
 
 	// NOTE: wasteful to keep these around, but still needed (eg. for Shatter())
 	// vertices.clear();

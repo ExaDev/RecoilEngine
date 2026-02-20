@@ -3,7 +3,6 @@
 #include "3DModel.hpp"
 
 #include <algorithm>
-#include <ranges>
 
 #include "3DModelMisc.hpp"
 #include "3DModelPiece.hpp"
@@ -137,9 +136,16 @@ void S3DModel::DrawStatic() const
 void S3DModel::UpdatePiecesMinMaxExtents()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	for (auto* piece : pieceObjects) {
-		piece->aabb.Reset();
-		piece->aabb.AddPoints(piece->GetVerticesVec() | std::views::transform(&SVertexData::pos));
+
+	for (const auto& vert : skinnedMesh.verts) {
+		const uint16_t pieceIdx = vert.boneIDs[0];
+		assert(pieceIdx != SVertexData::INVALID_BONEID);
+		assert(pieceIdx < pieceObjects.size());
+
+		auto* piece = pieceObjects[pieceIdx];
+		const Transform invBpose = piece->bposeTransform.InvertAffine();
+		const auto localPos = invBpose * float4{ vert.pos, 1.0f };
+		piece->aabb.AddPoint(localPos);
 	}
 }
 

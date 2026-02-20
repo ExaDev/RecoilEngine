@@ -315,26 +315,25 @@ namespace Impl {
 	std::vector<Skinning::SkinnedMesh> GetModelSpaceMeshes(const aiScene* scene, const S3DModel* model)
 	{
 		RECOIL_DETAILED_TRACY_ZONE;
-		std::vector<uint32_t> meshVertexMapping;
 		std::vector<Skinning::SkinnedMesh> meshes;
 
 		// Pre-compute all node transforms in a single pass
 		const auto nodeTransforms = GetNodeTransforms(scene);
 
 		for (uint32_t meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex) {
-			auto& [verts, indcs] = meshes.emplace_back();
-
 			const aiMesh* mesh = scene->mMeshes[meshIndex];
 
 			// Find the node containing this mesh and get its pre-computed transform
 			const aiNode* meshNode = FindNodeForMesh(scene->mRootNode, meshIndex);
-			Transform boneTra;
-			if (meshNode) {
-				auto it = nodeTransforms.find(meshNode);
-				if (it != nodeTransforms.end()) {
-					boneTra = it->second;
-				}
+			if (!meshNode) {
+				LOG_SL(LOG_SECTION_MODEL, L_ERROR, "Could not find node for mesh %d (name: \"%s\") in scene. Skipping mesh.", meshIndex, mesh->mName.C_Str());
+				continue;
 			}
+
+			auto it = nodeTransforms.find(meshNode);
+			assert(it != nodeTransforms.end());
+
+			auto& [verts, indcs] = meshes.emplace_back();
 
 			LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Fetching mesh %d from scene", meshIndex);
 			LOG_SL(LOG_SECTION_PIECE, L_DEBUG,
@@ -348,9 +347,6 @@ namespace Impl {
 
 			verts.reserve(mesh->mNumVertices);
 			indcs.reserve(mesh->mNumFaces * 3);
-
-			meshVertexMapping.clear();
-			meshVertexMapping.reserve(mesh->mNumVertices);
 
 			//bones info
 			std::vector<std::vector<std::pair<uint16_t, float>>> vertexWeights(mesh->mNumVertices);
@@ -372,7 +368,7 @@ namespace Impl {
 			for (auto& vertexWeight : vertexWeights) {
 				std::stable_sort(vertexWeight.begin(), vertexWeight.end(), [](const auto& lhs, const auto& rhs) {
 					return std::forward_as_tuple(lhs.second, lhs.first) > std::forward_as_tuple(rhs.second, rhs.first);
-				});
+					});
 				vertexWeight.resize(4, std::make_pair(SVertexData::INVALID_BONEID, 0.0f));
 			}
 
@@ -437,9 +433,8 @@ namespace Impl {
 					vertex.texCoords[uvChanIndex].y = mesh->mTextureCoords[uvChanIndex][vertexIndex].y;
 				}
 
-				vertex.TransformBy(boneTra);
+				vertex.TransformBy(it->second);
 
-				meshVertexMapping.push_back(verts.size());
 				verts.push_back(vertex);
 			}
 
@@ -453,7 +448,7 @@ namespace Impl {
 			 * anything more complex than triangles is
 			 * being split thanks to aiProcess_Triangulate
 			 */
-			for (unsigned faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex) {
+			for (uint32_t faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex) {
 				const aiFace& face = mesh->mFaces[faceIndex];
 
 				// some models contain lines (mNumIndices == 2) which
@@ -461,10 +456,8 @@ namespace Impl {
 				if (face.mNumIndices != 3)
 					continue;
 
-				for (unsigned vertexListID = 0; vertexListID < face.mNumIndices; ++vertexListID) {
-					const uint32_t vertexFaceIdx = face.mIndices[vertexListID];
-					const uint32_t vertexDrawIdx = meshVertexMapping[vertexFaceIdx];
-					indcs.push_back(vertexDrawIdx);
+				for (uint32_t vertexListID = 0; vertexListID < face.mNumIndices; ++vertexListID) {
+					indcs.push_back(face.mIndices[vertexListID]);
 				}
 			}
 		}
@@ -513,7 +506,7 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 
 	CFileHandler file(modelFilePath, SPRING_VFS_ZIP);
 
-	std::vector<unsigned char> fileBuf;
+	std::vector<uint8_t> fileBuf;
 	// load the lua metafile containing properties unique to Recoil models (must return a table)
 	std::string metaFileName = modelFilePath + ".lua";
 
@@ -609,9 +602,11 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 		LoadPiece(&model, scene->mRootNode, scene, modelTable, meshNames, pieceMap, parentMap);
 	}
 
-
 	// Update piece hierarchy based on metadata
 	BuildPieceHierarchy(&model, pieceMap, parentMap);
+
+	// Transform the piece vertices / indices to skins
+	ModelUtils::TransferPiecesToSkinnedMesh(&model);
 
 	// skinning support - save mesh data directly to model.skinnedMesh
 	if (!meshNames.empty()) {
@@ -633,7 +628,7 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 }
 
 
-void CAssParser::PreProcessFileBuffer(std::vector<unsigned char>& fileBuffer)
+void CAssParser::PreProcessFileBuffer(std::vector<uint8_t>& fileBuffer)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	// the Collada specification requires node uid's to be unique
@@ -646,7 +641,7 @@ void CAssParser::PreProcessFileBuffer(std::vector<unsigned char>& fileBuffer)
 	// names should be swapped before assimp processes the buffer
 	const std::regex nodePattern{"<node id=\"([a-zA-Z0-9_-]+)\" name=\"([a-zA-Z0-9_-]+)\" type=\"([a-zA-Z]+)\">"};
 
-	std::array<unsigned char, 1024> lineBuffer;
+	std::array<uint8_t, 1024> lineBuffer;
 	std::cmatch matchGroups;
 
 	const char* beg = reinterpret_cast<const char*>(fileBuffer.data());
@@ -677,38 +672,6 @@ void CAssParser::PreProcessFileBuffer(std::vector<unsigned char>& fileBuffer)
 	}
 }
 
-/*
-void CAssParser::CalculateModelMeshBounds(S3DModel* model, const aiScene* scene)
-{
-	model->meshBounds.resize(scene->mNumMeshes * 2);
-
-	// calculate bounds for each individual mesh of
-	// the model; currently we have no use for this
-	// and S3DModel has only one pair of bounds
-	//
-	for (size_t i = 0; i < scene->mNumMeshes; i++) {
-		const aiMesh* mesh = scene->mMeshes[i];
-
-		float3& mins = model->meshBounds[i*2 + 0];
-		float3& maxs = model->meshBounds[i*2 + 1];
-
-		mins = DEF_MIN_SIZE;
-		maxs = DEF_MAX_SIZE;
-
-		for (size_t vertexIndex= 0; vertexIndex < mesh->mNumVertices; vertexIndex++) {
-			const aiVector3D& aiVertex = mesh->mVertices[vertexIndex];
-			mins = std::min(mins, aiVectorToFloat3(aiVertex));
-			maxs = std::max(maxs, aiVectorToFloat3(aiVertex));
-		}
-
-		if (mins == DEF_MIN_SIZE) { mins = ZeroVector; }
-		if (maxs == DEF_MAX_SIZE) { maxs = ZeroVector; }
-	}
-}
-*/
-
-
-
 void CAssParser::LoadPieceTransformations(
 	SAssPiece* piece,
 	const S3DModel* model,
@@ -719,8 +682,6 @@ void CAssParser::LoadPieceTransformations(
 	RECOIL_DETAILED_TRACY_ZONE;
 	Impl::LoadPieceTransformations<SAssPiece>(piece, model, pieceNode, pieceTable, optRotation);
 }
-
-
 
 void CAssParser::SetPieceName(
 	SAssPiece* piece,
@@ -790,118 +751,113 @@ void CAssParser::SetPieceParentName(
 
 void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, const aiNode* pieceNode, const aiScene* scene)
 {
-	RECOIL_DETAILED_TRACY_ZONE;
-	std::vector<unsigned> meshVertexMapping;
+    RECOIL_DETAILED_TRACY_ZONE;
 
-	// Get vertex data from node meshes
-	for (unsigned meshListIndex = 0; meshListIndex < pieceNode->mNumMeshes; ++meshListIndex) {
-		const uint32_t meshIndex = pieceNode->mMeshes[meshListIndex];
-		const aiMesh* mesh = scene->mMeshes[meshIndex];
+    // Get vertex data from node meshes
+    for (uint32_t meshListIndex = 0; meshListIndex < pieceNode->mNumMeshes; ++meshListIndex) {
+        const uint32_t meshIndex = pieceNode->mMeshes[meshListIndex];
+        const aiMesh* mesh = scene->mMeshes[meshIndex];
 
-		LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Fetching mesh %d from scene", meshIndex);
-		LOG_SL(LOG_SECTION_PIECE, L_DEBUG,
-			"Processing vertices for mesh %d (%d vertices)",
-			meshIndex, mesh->mNumVertices);
-		LOG_SL(LOG_SECTION_PIECE, L_DEBUG,
-			"Normals: %s Tangents/Bitangents: %s TexCoords: %s",
-			(mesh->HasNormals() ? "Y" : "N"),
-			(mesh->HasTangentsAndBitangents() ? "Y" : "N"),
-			(mesh->HasTextureCoords(0) ? "Y" : "N"));
+        LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Fetching mesh %d from scene", meshIndex);
+        LOG_SL(LOG_SECTION_PIECE, L_DEBUG,
+            "Processing vertices for mesh %d (%d vertices)",
+            meshIndex, mesh->mNumVertices);
+        LOG_SL(LOG_SECTION_PIECE, L_DEBUG,
+            "Normals: %s Tangents/Bitangents: %s TexCoords: %s",
+            (mesh->HasNormals() ? "Y" : "N"),
+            (mesh->HasTangentsAndBitangents() ? "Y" : "N"),
+            (mesh->HasTextureCoords(0) ? "Y" : "N"));
 
-		auto& verts = piece->GetVerticesVec();
-		auto& indcs = piece->GetIndicesVec();
+        auto& verts = piece->GetVerticesVec();
+        auto& indcs = piece->GetIndicesVec();
 
-		verts.reserve(verts.size() + mesh->mNumVertices);
-		indcs.reserve(indcs.size() + mesh->mNumFaces * 3);
+        verts.reserve(verts.size() + mesh->mNumVertices);
+        indcs.reserve(indcs.size() + mesh->mNumFaces * 3);
 
-		meshVertexMapping.clear();
-		meshVertexMapping.reserve(mesh->mNumVertices);
+        const uint32_t baseOffset = verts.size();
 
-		// extract vertex data per mesh
-		for (unsigned vertexIndex = 0; vertexIndex < mesh->mNumVertices; ++vertexIndex) {
-			const aiVector3D& aiVertex = mesh->mVertices[vertexIndex];
+        // extract vertex data per mesh
+        for (uint32_t vertexIndex = 0; vertexIndex < mesh->mNumVertices; ++vertexIndex) {
+            const aiVector3D& aiVertex = mesh->mVertices[vertexIndex];
 
-			SVertexData vertex;
+            SVertexData vertex;
 
-			// vertex coordinates
-			vertex.pos = aiVectorToFloat3(aiVertex);
+            // vertex coordinates
+            vertex.pos = aiVectorToFloat3(aiVertex);
 
-			if (mesh->HasNormals()) {
-				// vertex normal
-				const aiVector3D& aiNormal = mesh->mNormals[vertexIndex];
+            if (mesh->HasNormals()) {
+                // vertex normal
+                const aiVector3D& aiNormal = mesh->mNormals[vertexIndex];
 
-				if (IS_QNAN(aiNormal)) {
-					LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Malformed normal (model->name=\"%s\" piece->name=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), piece->name.c_str(), vertexIndex, aiNormal.x, aiNormal.y, aiNormal.z);
-					vertex.normal = float3{ 0.0f, 1.0f, 0.0f };
-				}
-				else {
-					vertex.normal = (aiVectorToFloat3(aiNormal)).SafeANormalize();
-				}
-			}
-			else {
-				vertex.normal = float3{ 0.0f, 1.0f, 0.0f };
-			}
+                if (IS_QNAN(aiNormal)) {
+                    LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Malformed normal (model->name=\"%s\" piece->name=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), piece->name.c_str(), vertexIndex, aiNormal.x, aiNormal.y, aiNormal.z);
+                    vertex.normal = float3{ 0.0f, 1.0f, 0.0f };
+                }
+                else {
+                    vertex.normal = (aiVectorToFloat3(aiNormal)).SafeANormalize();
+                }
+            }
+            else {
+                vertex.normal = float3{ 0.0f, 1.0f, 0.0f };
+            }
 
-			// vertex tangent, x is positive in texture axis
-			if (mesh->HasTangentsAndBitangents()) {
-				const aiVector3D& aiTangent = mesh->mTangents[vertexIndex];
-				const aiVector3D& aiBitangent = mesh->mBitangents[vertexIndex];
+            // vertex tangent, x is positive in texture axis
+            if (mesh->HasTangentsAndBitangents()) {
+                const aiVector3D& aiTangent = mesh->mTangents[vertexIndex];
+                const aiVector3D& aiBitangent = mesh->mBitangents[vertexIndex];
 
-				if (IS_QNAN(aiTangent.x) || IS_QNAN(aiTangent.y) || IS_QNAN(aiTangent.z)) {
-					LOG_SL(LOG_SECTION_PIECE, L_INFO, "Malformed tangent (model->name=\"%s\" piece->name=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), piece->name.c_str(), vertexIndex, aiTangent.x, aiTangent.y, aiTangent.z);
-					vertex.tangent = float4{ 1.0f, 0.0f, 0.0f, 0.0f };
-				} else {
-					vertex.tangent = (aiVectorToFloat3(aiTangent)).SafeANormalize();
-				}
+                if (IS_QNAN(aiTangent.x) || IS_QNAN(aiTangent.y) || IS_QNAN(aiTangent.z)) {
+                    LOG_SL(LOG_SECTION_PIECE, L_INFO, "Malformed tangent (model->name=\"%s\" piece->name=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), piece->name.c_str(), vertexIndex, aiTangent.x, aiTangent.y, aiTangent.z);
+                    vertex.tangent = float4{ 1.0f, 0.0f, 0.0f, 0.0f };
+                } else {
+                    vertex.tangent = (aiVectorToFloat3(aiTangent)).SafeANormalize();
+                }
 
-				if (IS_QNAN(aiBitangent.x) || IS_QNAN(aiBitangent.y) || IS_QNAN(aiBitangent.z)) {
-					LOG_SL(LOG_SECTION_PIECE, L_INFO, "Malformed bitangent (model->name=\"%s\" piece->name=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), piece->name.c_str(), vertexIndex, aiBitangent.x, aiBitangent.y, aiBitangent.z);
-					vertex.tangent.w = 1.0f;
-				} else {
-					const auto B = (aiVectorToFloat3(aiBitangent)).SafeANormalize();
-					const float handednessSign = Sign(B.dot(vertex.normal.cross(vertex.tangent)));
-					vertex.tangent.w = handednessSign;
-				}
-			}
+                if (IS_QNAN(aiBitangent.x) || IS_QNAN(aiBitangent.y) || IS_QNAN(aiBitangent.z)) {
+                    LOG_SL(LOG_SECTION_PIECE, L_INFO, "Malformed bitangent (model->name=\"%s\" piece->name=\"%s\" vertexIndex=%d x=%f y=%f z=%f)", model->name.c_str(), piece->name.c_str(), vertexIndex, aiBitangent.x, aiBitangent.y, aiBitangent.z);
+                    vertex.tangent.w = 1.0f;
+                } else {
+                    const auto B = (aiVectorToFloat3(aiBitangent)).SafeANormalize();
+                    const float handednessSign = Sign(B.dot(vertex.normal.cross(vertex.tangent)));
+                    vertex.tangent.w = handednessSign;
+                }
+            }
 
-			// vertex tex-coords per channel
-			for (uint32_t uvChanIndex = 0; uvChanIndex < SVertexData::NUM_MODEL_UVCHANNS; uvChanIndex++) {
-				if (!mesh->HasTextureCoords(uvChanIndex))
-					break;
+            // vertex tex-coords per channel
+            for (uint32_t uvChanIndex = 0; uvChanIndex < SVertexData::NUM_MODEL_UVCHANNS; uvChanIndex++) {
+                if (!mesh->HasTextureCoords(uvChanIndex))
+                    break;
 
-				vertex.texCoords[uvChanIndex].x = mesh->mTextureCoords[uvChanIndex][vertexIndex].x;
-				vertex.texCoords[uvChanIndex].y = mesh->mTextureCoords[uvChanIndex][vertexIndex].y;
-			}
+                vertex.texCoords[uvChanIndex].x = mesh->mTextureCoords[uvChanIndex][vertexIndex].x;
+                vertex.texCoords[uvChanIndex].y = mesh->mTextureCoords[uvChanIndex][vertexIndex].y;
+            }
 
-			meshVertexMapping.push_back(verts.size());
-			verts.push_back(vertex);
-		}
+            verts.push_back(vertex);
+        }
 
-		// extract face data
-		LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Processing faces for mesh %d (%d faces)", meshIndex, mesh->mNumFaces);
+        // extract face data
+        LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Processing faces for mesh %d (%d faces)", meshIndex, mesh->mNumFaces);
 
-		/*
-		 * since aiProcess_SortByPType is being used,
-		 * we're sure we'll get only 1 type here,
-		 * so combination check isn't needed, also
-		 * anything more complex than triangles is
-		 * being split thanks to aiProcess_Triangulate
-		 */
-		for (unsigned faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex) {
-			const aiFace& face = mesh->mFaces[faceIndex];
+        /*
+         * since aiProcess_SortByPType is being used,
+         * we're sure we'll get only 1 type here,
+         * so combination check isn't needed, also
+         * anything more complex than triangles is
+         * being split thanks to aiProcess_Triangulate
+         */
+        for (uint32_t faceIndex = 0; faceIndex < mesh->mNumFaces; ++faceIndex) {
+            const aiFace& face = mesh->mFaces[faceIndex];
 
-			// some models contain lines (mNumIndices == 2) which
-			// we cannot render and they would need a 2nd drawcall)
-			if (face.mNumIndices != 3)
-				continue;
+            // some models contain lines (mNumIndices == 2) which
+            // we cannot render and they would need a 2nd drawcall)
+            if (face.mNumIndices != 3)
+                continue;
 
-			for (unsigned vertexListID = 0; vertexListID < face.mNumIndices; ++vertexListID) {
-				const uint32_t vertexFaceIdx = face.mIndices[vertexListID];
-				const uint32_t vertexDrawIdx = meshVertexMapping[vertexFaceIdx];
-				indcs.push_back(vertexDrawIdx);
-			}
-		}
-	}
+            for (uint32_t vertexListID = 0; vertexListID < face.mNumIndices; ++vertexListID) {
+                indcs.push_back(baseOffset + face.mIndices[vertexListID]);
+            }
+        }
+    }
 }
 
 // Not efficient, but there aren't that many pieces

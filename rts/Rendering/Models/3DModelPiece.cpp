@@ -70,6 +70,15 @@ void S3DModelPiece::CreateShatterPieces()
 }
 
 
+void S3DModelPiece::SetGOffset()
+{
+	// Calculate goffset (global offset from root piece)
+	// Note: goffset only captures translation, not rotation/scale
+	// Model bounds are calculated separately using bposeTransform in S3DModel::CalcModelBounds()
+	const CMatrix44f scaleRotMat = ComposeTransform(ZeroVector, ZeroVector, scale).ToMatrix();
+	goffset = scaleRotMat.Mul(offset) + (parent != nullptr ? parent->goffset : ZeroVector);
+}
+
 void S3DModelPiece::CreateShatterPiecesVariation(int num)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -220,21 +229,7 @@ void S3DModelPiece::SetEmitters()
 		emitPos = GetVertexPos(0);
 		emitDir = GetVertexPos(1) - GetVertexPos(0);
 	}
-}
-
-void S3DModelPiece::PostProcessGeometry(uint32_t pieceIndex)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	if (!HasGeometryData())
-		return;
-
-
-	for (auto& v : vertices) {
-		if (v.boneIDs == SVertexData::DEFAULT_BONEIDS) {
-			// Assign pieceIndex to first bone ID
-			v.boneIDs[0] = static_cast<uint16_t>(pieceIndex);
-		}
-	}
+	emitDir.Normalize();
 }
 
 void S3DModelPiece::DrawElements(GLuint prim) const

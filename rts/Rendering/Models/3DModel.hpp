@@ -59,7 +59,7 @@ struct S3DModel
 
 	S3DModelPiece* GetPiece(size_t i) const { assert(i < pieceObjects.size()); return pieceObjects[i]; }
 	S3DModelPiece* GetRootPiece() const { return (GetPiece(GetRootPieceIndex())); }
-	size_t GetRootPieceIndex() const { return 0; }
+	constexpr size_t GetRootPieceIndex() const { return 0; }
 
 	void AddPiece(S3DModelPiece* p) { pieceObjects.push_back(p); }
 	void DrawStatic() const;

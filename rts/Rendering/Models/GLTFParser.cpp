@@ -490,18 +490,19 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 	}
 
 	// non-skinning case
-	if (model.skinnedMesh.verts.empty()) {
-		for (size_t pi = 0; pi < model.pieceObjects.size(); ++pi) {
-			auto* piece = static_cast<GLTFPiece*>(model.pieceObjects[pi]);
-			if (piece->nodeIndex == GLTFPiece::INVALID_NODE_INDEX)
-				continue;
+	for (size_t pi = 0; pi < model.pieceObjects.size(); ++pi) {
+		auto* piece = static_cast<GLTFPiece*>(model.pieceObjects[pi]);
+		if (piece->nodeIndex == GLTFPiece::INVALID_NODE_INDEX)
+			continue;
 
-			if (piece->GetVerticesVec().empty())
-				continue;
+		if (piece->GetVerticesVec().empty())
+			continue;
 
-			Impl::ReplaceNodeIndexWithPieceIndex(piece->GetVerticesVec(), nodeIdxToPieceIdx);
-		}
+		Impl::ReplaceNodeIndexWithPieceIndex(piece->GetVerticesVec(), nodeIdxToPieceIdx);
 	}
+
+	// Transform the piece vertices / indices to skins
+	ModelUtils::TransferPiecesToSkinnedMesh(&model);
 
 	// will also calculate pieces / model bounding box
 	ModelUtils::CalculateModelProperties(&model, optionalModelParams);

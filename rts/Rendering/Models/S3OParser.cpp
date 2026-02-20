@@ -160,7 +160,7 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 
 	// post process the piece
 	{
-		piece->goffset = piece->offset + ((parent != NULL)? parent->goffset: ZeroVector);
+		piece->SetGOffset();
 
 		piece->Trianglize();
 		piece->SetVertexTangents();

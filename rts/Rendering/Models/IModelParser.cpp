@@ -439,7 +439,16 @@ void CModelLoader::PostProcessGeometry(S3DModel* model)
 	// does quads and strips conversion sometimes. Need to run first
 	for (size_t i = 0; i < model->pieceObjects.size(); ++i) {
 		auto* p = model->pieceObjects[i];
-		p->PostProcessGeometry(static_cast<uint32_t>(i));
+
+		// Calculate tangents for pieces with geometry
+		if (p->HasGeometryData()) {
+			auto& verts = p->GetVerticesVec();
+			auto& indcs = p->GetIndicesVec();
+			if (!verts.empty() && !indcs.empty()) {
+				ModelUtils::CalculateTangents(verts, indcs);
+			}
+		}
+
 		p->CreateShatterPieces();
 	}
 	{

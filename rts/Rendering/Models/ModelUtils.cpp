@@ -13,12 +13,7 @@
 
 void ModelUtils::CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece)
 {
-	// Calculate goffset (global offset from root piece)
-	// Note: goffset only captures translation, not rotation/scale
-	// Model bounds are calculated separately using bposeTransform in S3DModel::CalcModelBounds()
-	const CMatrix44f scaleRotMat = piece->ComposeTransform(ZeroVector, ZeroVector, piece->scale).ToMatrix();
-	piece->goffset = scaleRotMat.Mul(piece->offset) + ((piece->parent != nullptr) ? piece->parent->goffset : ZeroVector);
-
+	piece->SetGOffset();
 	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
 	// Repeat with children
@@ -82,6 +77,47 @@ void ModelUtils::GetModelParams(const LuaTable& modelTable, ModelParams& modelPa
 	CondGetLuaValue(modelParams.flipTextures, "fliptextures");
 	CondGetLuaValue(modelParams.invertTeamColor, "invertteamcolor");
 	CondGetLuaValue(modelParams.s3oCompat, "s3ocompat");
+}
+
+void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+
+	for (size_t pieceIdx = 0; pieceIdx < model->pieceObjects.size(); ++pieceIdx) {
+		auto* piece = model->pieceObjects[pieceIdx];
+		piece->SetEmitters();
+
+		if (!piece->HasGeometryData())
+			continue;
+
+		auto& pieceVerts = piece->GetVerticesVec();
+		auto& pieceIndcs = piece->GetIndicesVec();
+
+		const auto vertOffset = model->skinnedMesh.verts.size();
+
+		// Reserve space
+		model->skinnedMesh.verts.reserve(vertOffset + pieceVerts.size());
+		model->skinnedMesh.indcs.reserve(model->skinnedMesh.indcs.size() + pieceIndcs.size());
+
+		// Transform verts
+		for (const auto& vert : pieceVerts) {
+			auto& transformedVertex = model->skinnedMesh.verts.emplace_back(vert.TransformBy(piece->bposeTransform));
+			assert(transformedVertex.boneIDs == SVertexData::DEFAULT_BONEIDS);
+			assert(transformedVertex.boneWeights == SVertexData::DEFAULT_BONEWEIGHTS);
+
+			// Assign pieceIndex to first bone ID
+			transformedVertex.boneIDs[0] = static_cast<uint16_t>(pieceIdx);
+		}
+
+		// Copy and adjust indices
+		for (auto idx : pieceIndcs) {
+			model->skinnedMesh.indcs.emplace_back(static_cast<uint32_t>(vertOffset + idx));
+		}
+
+		// makes no sense to keep them?
+		pieceVerts.clear();
+		pieceIndcs.clear();
+	}
 }
 
 void ModelUtils::CalculateNormals(std::vector<SVertexData>& verts, const std::vector<uint32_t>& indcs)

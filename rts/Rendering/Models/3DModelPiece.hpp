@@ -41,7 +41,7 @@ struct S3DModelPiece {
 		goffset = ZeroVector;
 		scale = 1.0f;
 
-		aabb = {};
+		aabb.Reset();
 
 		vertOffset = ~0u;
 		vertCount = 0;
@@ -59,8 +59,6 @@ struct S3DModelPiece {
 	// internal use
 	const auto& GetVertexPos(const int idx) const { return vertices[idx].pos; }
 	const auto& GetNormal(const int idx) const { return vertices[idx].normal; }
-
-	virtual void PostProcessGeometry(uint32_t pieceIndex);
 
 	void DrawElements(uint32_t prim = 0x0004/*GL_TRIANGLES*/) const;
 	static void DrawShatterElements(uint32_t vboIndxStart, uint32_t vboIndxCount, uint32_t prim = 0x0004/*GL_TRIANGLES*/);
@@ -102,6 +100,8 @@ public:
 	std::vector<uint32_t>& GetShatterIndicesVec() { return shatterIndices; }
 
 	bool HasBackedTra() const { return bakedTransform.has_value(); }
+
+	void SetGOffset();
 private:
 	void CreateShatterPiecesVariation(int num);
 	void DrawStaticLegacyRecImpl(const float3& rootT) const;

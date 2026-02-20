@@ -93,7 +93,8 @@ struct S3DOPiece: public S3DModelPiece
 		emitDir = ZeroVector;
 	}
 
-	void PostProcessGeometry(uint32_t pieceIndex) override;
+	void Trianglize();
+
 public:
 	void CalcNormals();
 

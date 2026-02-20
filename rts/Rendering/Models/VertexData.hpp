@@ -84,4 +84,5 @@ struct SVertexData {
 	}
 
 	void TransformBy(const Transform& transform);
+	SVertexData TransformBy(const Transform& transform) const;
 };

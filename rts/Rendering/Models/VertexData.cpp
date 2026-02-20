@@ -10,3 +10,10 @@ void SVertexData::TransformBy(const Transform& transform)
 	tangent  = (transform * float4{ tangent , 0.0f }).xyz;
 	tangent.w = handednessSign;
 }
+
+SVertexData SVertexData::TransformBy(const Transform& transform) const
+{
+	SVertexData copy = *this;
+	copy.TransformBy(transform); // calls the non-const overload
+	return copy;
+}

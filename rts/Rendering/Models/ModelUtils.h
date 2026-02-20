@@ -48,6 +48,9 @@ namespace ModelUtils {
 	// Calculate missing tangents
 	void CalculateTangents(std::vector<SVertexData>& verts, const std::vector<uint32_t>& indcs);
 
+	// Transfer all piece vertices/indices to model's skinnedMesh, transforming vertices to model space
+	void TransferPiecesToSkinnedMesh(S3DModel* model);
+
 	static constexpr uint32_t INVALID_INDEX = uint32_t(-1);
 }
 
