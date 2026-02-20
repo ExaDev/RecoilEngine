@@ -203,7 +203,7 @@ namespace Impl {
 	void ReplaceNodeIndexWithPieceIndex(std::vector<SVertexData>& verts, const UM& nodeIdxToPieceIdx) {
 		for (auto& vert : verts) {
 			for (size_t wi = 0; wi < SVertexData::MAX_BONES_PER_VERTEX; ++wi) {
-				const auto nodeIdx = Skinning::GetBoneID(vert, wi);
+				const auto nodeIdx = vert.boneIDs[wi];
 				if (nodeIdx == INV_PIECE_NUM)
 					continue;
 

@@ -15,8 +15,6 @@ namespace Skinning {
 		std::vector<SVertexData> verts;
 		std::vector<uint32_t> indcs;
 	};
-
-	uint16_t GetBoneID(const SVertexData& vert, size_t wi);
 };
 
 namespace ModelUtils {

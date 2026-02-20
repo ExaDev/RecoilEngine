@@ -11,11 +11,6 @@
 #include "System/Misc/TracyDefs.h"
 #include "Lua/LuaParser.h"
 
-uint16_t Skinning::GetBoneID(const SVertexData& vert, size_t wi)
-{
-	return vert.boneIDs[wi];
-};
-
 void ModelUtils::CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece)
 {
 	// Calculate goffset (global offset from root piece)
