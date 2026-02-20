@@ -361,7 +361,6 @@ S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::
 	piece->offset.x =  me.XFromParent * SCALE_FACTOR_3DO;
 	piece->offset.y =  me.YFromParent * SCALE_FACTOR_3DO;
 	piece->offset.z = -me.ZFromParent * SCALE_FACTOR_3DO;
-	piece->SetGOffset();
 
 	piece->GetVertices(&me, buf);
 	piece->GetPrimitives(model, me.OffsetToPrimitiveArray, me.NumberOfPrimitives, ((pos == 0)? me.SelectionPrimitive: -1), buf, teamTextures);
@@ -370,8 +369,6 @@ S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::
 	piece->Trianglize();
 	ModelUtils::CalculateTangents(piece->GetVerticesVec(), piece->GetIndicesVec());
 	piece->SetMinMaxExtends();
-
-	piece->SetEmitters();
 
 	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 

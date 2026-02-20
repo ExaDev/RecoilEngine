@@ -555,6 +555,7 @@ GLTFPiece* CGLTFParser::AllocRootEmptyPiece(S3DModel* model, const Transform& pa
 	bakedTransform.s = 1.0f;
 	piece->SetBakedTransform(bakedTransform); // bakedRotAngles are not read or supported for GLTF
 	piece->offset = parentTransform.t;
+	piece->goffset = piece->offset;
 	piece->scale = parentTransform.s;
 
 
@@ -613,7 +614,6 @@ GLTFPiece* CGLTFParser::LoadPiece(S3DModel* model, GLTFPiece* parentPiece, const
 	auto& indcs = piece->GetIndicesVec();
 	const auto& mesh = asset.meshes[*node.meshIndex];
 	Impl::ReadGeometryData(asset, mesh.primitives, verts, indcs, nodeIndex, nullptr);
-	piece->SetEmitters();
 
 	return piece;
 }

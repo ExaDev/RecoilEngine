@@ -30,9 +30,6 @@ namespace ModelUtils {
 		std::optional<bool> s3oCompat;
 	};
 
-	// Iterate over the model and calculate its overall dimensions
-	void CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece);
-
 	// Get ModelParams from the modelTable
 	void GetModelParams(const LuaTable& modelTable, ModelParams& modelParams);
 

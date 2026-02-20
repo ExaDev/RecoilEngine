@@ -101,7 +101,7 @@ public:
 
 	bool HasBackedTra() const { return bakedTransform.has_value(); }
 
-	void SetGOffset();
+	void SetGlobalOffset();
 private:
 	void CreateShatterPiecesVariation(int num);
 	void DrawStaticLegacyRecImpl(const float3& rootT) const;

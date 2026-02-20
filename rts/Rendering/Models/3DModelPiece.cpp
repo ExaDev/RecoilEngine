@@ -69,8 +69,7 @@ void S3DModelPiece::CreateShatterPieces()
 	}
 }
 
-
-void S3DModelPiece::SetGOffset()
+void S3DModelPiece::SetGlobalOffset()
 {
 	// Calculate goffset (global offset from root piece)
 	// Note: goffset only captures translation, not rotation/scale

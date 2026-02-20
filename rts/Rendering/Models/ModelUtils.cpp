@@ -11,24 +11,11 @@
 #include "System/Misc/TracyDefs.h"
 #include "Lua/LuaParser.h"
 
-void ModelUtils::CalculateModelDimensions(S3DModel* model, S3DModelPiece* piece)
-{
-	piece->SetGOffset();
-	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
-
-	// Repeat with children
-	for (S3DModelPiece* childPiece : piece->children) {
-		CalculateModelDimensions(model, childPiece);
-	}
-}
-
 void ModelUtils::CalculateModelProperties(S3DModel* model)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
-	model->UpdatePiecesMinMaxExtents();
-	CalculateModelDimensions(model, model->GetRootPiece());
-	model->CalcModelBounds();
+	model->FinalizeLoad();
 
 	const auto& modelParams = model->modelParams;
 

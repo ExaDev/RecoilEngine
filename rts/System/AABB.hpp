@@ -23,6 +23,8 @@ public:
 	}
 
 	void Combine(const AABB& other) {
+		assert(!other.IsReset());
+
 		mins = float3::min(mins, other.mins);
 		maxs = float3::max(maxs, other.maxs);
 	}

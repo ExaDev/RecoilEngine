@@ -67,9 +67,7 @@ struct S3DModel
 
 	void FlattenPieceTree(S3DModelPiece* root);
 
-	void UpdatePiecesMinMaxExtents();
-	/// Calculate model bounds from piece AABBs transformed by their bind-pose transforms
-	void CalcModelBounds();
+	void FinalizeLoad();
 
 	// default values set by parsers; radius is also cached in WorldObject::drawRadius (used by projectiles)
 	float CalcDrawRadius() const { return aabb.CalcRadius(); }

@@ -361,17 +361,15 @@ void CModelLoader::FillModel(
 ) {
 	ParseModel(model, name, path);
 
+	assert(model.numPieces != 0);
+	assert(model.GetRootPiece() != nullptr);
+
 	// Transform the piece vertices / indices to skins
 	ModelUtils::TransferPiecesToSkinnedMesh(&model);
 
 	// will also calculate pieces / model bounding box
 	ModelUtils::CalculateModelProperties(&model);
 	ModelLog::LogModelProperties(model);
-
-	assert(model.numPieces != 0);
-	assert(model.GetRootPiece() != nullptr);
-
-	model.CalcModelBounds();
 
 	PostProcessGeometry(&model);
 }

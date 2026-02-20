@@ -154,8 +154,6 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 
 	// post process the piece
 	{
-		piece->SetGOffset();
-
 		piece->Trianglize();
 		piece->SetVertexTangents();
 		piece->SetMinMaxExtends();
@@ -171,8 +169,6 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 		SS3OPiece* childPiece = LoadPiece(model, piece, buf, childOffset);
 		piece->children.push_back(childPiece);
 	}
-
-	piece->SetEmitters();
 
 	return piece;
 }

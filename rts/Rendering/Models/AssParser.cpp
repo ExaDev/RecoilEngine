@@ -12,7 +12,6 @@
 #include "3DModelDefs.hpp"
 #include "3DModelLog.h"
 #include "ModelUtils.h"
-#include "AssIO.h"
 
 #include "Lua/LuaParser.h"
 #include "Sim/Misc/CollisionVolume.h"
@@ -953,8 +952,6 @@ SAssPiece* CAssParser::LoadPiece(
 	for (uint32_t i = 0; i < pieceNode->mNumChildren; ++i) {
 		LoadPiece(model, pieceNode->mChildren[i], scene, modelTable, skipList, pieceMap, parentMap);
 	}
-
-	piece->SetEmitters();
 
 	pieceMap[piece->name] = piece;
 	return piece;

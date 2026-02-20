@@ -109,6 +109,8 @@ void S3DModel::FlattenPieceTree(S3DModelPiece* root)
 
 	while (!stack.empty()) {
 		S3DModelPiece* p = stack.back();
+		// use this opportunity to set gOffset
+		p->SetGlobalOffset();
 
 		stack.pop_back();
 		pieceObjects.push_back(p);
@@ -133,11 +135,14 @@ void S3DModel::DrawStatic() const
 	S3DModelHelpers::UnbindLegacyAttrVBOs();
 }
 
-void S3DModel::UpdatePiecesMinMaxExtents()
+void S3DModel::FinalizeLoad()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
+	aabb.Reset();
 	for (const auto& vert : skinnedMesh.verts) {
+		aabb.AddPoint(vert.pos);
+
 		const uint16_t pieceIdx = vert.boneIDs[0];
 		assert(pieceIdx != SVertexData::INVALID_BONEID);
 		assert(pieceIdx < pieceObjects.size());
@@ -147,18 +152,14 @@ void S3DModel::UpdatePiecesMinMaxExtents()
 		const auto localPos = invBpose * float4{ vert.pos, 1.0f };
 		piece->aabb.AddPoint(localPos);
 	}
-}
 
-void S3DModel::CalcModelBounds()
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	aabb.Reset();
+	auto TraversePieceTree = [](this auto&& self, S3DModelPiece* piece) -> void {
+		piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
-	for (const auto* piece : pieceObjects) {
-		if (!piece->HasGeometryData())
-			continue;
+		for (S3DModelPiece* childPiece : piece->children) {
+			self(childPiece);
+		}
+	};
 
-		// Transform the piece's local AABB by its bind-pose transform to get model-space bounds
-		aabb.Combine(piece->aabb.CalcTransformed(piece->bposeTransform));
-	}
+	TraversePieceTree(GetRootPiece());
 }
