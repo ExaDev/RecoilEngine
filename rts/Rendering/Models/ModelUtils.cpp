@@ -92,7 +92,11 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 		auto& pieceVerts = piece->tmpVerts;
 		auto& pieceIndcs = piece->tmpIndcs;
 
-		const auto vertOffset = model->skinnedMesh.verts.size();
+		// Record relative offset and count for this piece in skinnedMesh
+		piece->relVertOff = static_cast<uint32_t>(model->skinnedMesh.verts.size());
+		piece->relVertCnt = static_cast<uint32_t>(pieceVerts.size());
+		piece->relIndxOff = static_cast<uint32_t>(model->skinnedMesh.indcs.size());
+		piece->relIndxCnt = static_cast<uint32_t>(pieceIndcs.size());
 
 		// Transform verts
 		for (const auto& vert : pieceVerts) {
@@ -106,7 +110,7 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 
 		// Copy and adjust indices
 		for (auto idx : pieceIndcs) {
-			model->skinnedMesh.indcs.emplace_back(static_cast<uint32_t>(vertOffset + idx));
+			model->skinnedMesh.indcs.emplace_back(static_cast<uint32_t>(piece->relVertOff + idx));
 		}
 
 		// makes no sense to keep them?

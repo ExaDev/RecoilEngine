@@ -46,6 +46,11 @@ struct S3DModelPiece {
 		vertIndex = ~0u;
 		indxStart = ~0u;
 		indxCount = ~0u;
+
+		relVertOff = ~0u;
+		relVertCnt = 0;
+		relIndxOff = ~0u;
+		relIndxCnt = 0;
 	}
 
 	void SetEmitters();
@@ -76,7 +81,7 @@ public:
 	const CollisionVolume* GetCollisionVolume() const { return &colvol; }
 	      CollisionVolume* GetCollisionVolume()       { return &colvol; }
 
-	bool HasGeometryData() const { static_assert(false); return tmpIndcs.size() >= 3; }
+	bool HasGeometryData() const { return tmpIndcs.size() >= 3; }
 	void SetParentModel(S3DModel* model_) { model = model_; }
 	const S3DModel* GetParentModel() const { return model; }
 
@@ -114,6 +119,12 @@ public:
 	uint32_t vertIndex = ~0u; // global vertex number offset
 	uint32_t indxStart = ~0u; // global Index VBO offset
 	uint32_t indxCount = ~0u;
+
+	// Relative offset/count within model.skinnedMesh (set for pieces with geometry)
+	uint32_t relVertOff = ~0u;
+	uint32_t relVertCnt = 0;
+	uint32_t relIndxOff = ~0u;
+	uint32_t relIndxCnt = 0;
 
 	// Temporary vertex and index data, cleared after upload to GPU
 	std::vector<SVertexData> tmpVerts;

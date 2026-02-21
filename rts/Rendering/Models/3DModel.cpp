@@ -40,6 +40,9 @@ S3DModel& S3DModel::operator= (S3DModel&& m) noexcept {
 	loadStatus = m.loadStatus;
 	uploaded = m.uploaded;
 
+	skinnedMesh = std::move(m.skinnedMesh);
+	modelParams = std::move(m.modelParams);
+
 	std::swap(traAlloc, m.traAlloc);
 
 	return *this;
