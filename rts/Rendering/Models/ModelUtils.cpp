@@ -68,13 +68,13 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 		const auto totalVerts = std::ranges::fold_left(
 			model->pieceObjects, model->skinnedMesh.verts.size(),
 			[](auto acc, auto* piece) {
-				return acc + piece->GetVerticesVec().size();
+				return acc + piece->tmpVerts.size();
 			}
 		);
 		const auto totalIndcs = std::ranges::fold_left(
 			model->pieceObjects, model->skinnedMesh.indcs.size(),
 			[](auto acc, auto* piece) {
-				return acc + piece->GetIndicesVec().size();
+				return acc + piece->tmpIndcs.size();
 			}
 		);
 
@@ -89,8 +89,8 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 		if (!piece->HasGeometryData())
 			continue;
 
-		auto& pieceVerts = piece->GetVerticesVec();
-		auto& pieceIndcs = piece->GetIndicesVec();
+		auto& pieceVerts = piece->tmpVerts;
+		auto& pieceIndcs = piece->tmpIndcs;
 
 		const auto vertOffset = model->skinnedMesh.verts.size();
 

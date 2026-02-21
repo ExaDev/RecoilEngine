@@ -406,18 +406,18 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 				file << "\t\t\tscales: " << TapFloats(p->aabb.mins);
 				file << "\t\t\tscales: " << TapFloats(p->aabb.maxs);
 
-				// GetVerticesVec and GetIndicesVec are now empty after upload to GPu is complete
+			// tmpVerts and tmpIndcs are now empty after upload to GPU is complete
 #if 0
-				file << "\t\t\tvertices.size(): " << p->GetVerticesVec().size() << "\n";
-				for (const auto& v : p->GetVerticesVec()) { //is it sync significant?
-					file << "\t\t\tpos: " << TapFloats(v.pos);
-				}
+			file << "\t\t\tvertices.size(): " << p->tmpVerts.size() << "\n";
+			for (const auto& v : p->tmpVerts) { //is it sync significant?
+				file << "\t\t\tpos: " << TapFloats(v.pos);
+			}
 
-				file << "\t\t\tindices.size(): " << p->GetIndicesVec().size() << "\n";
-				file << "\t\t\t";
-				for (const auto& i : p->GetIndicesVec()) { //is it sync significant?
-					file << i << ", ";
-				}
+			file << "\t\t\tindices.size(): " << p->tmpIndcs.size() << "\n";
+			file << "\t\t\t";
+			for (const auto& i : p->tmpIndcs) { //is it sync significant?
+				file << i << ", ";
+			}
 #endif
 				file << "\n";
 			}

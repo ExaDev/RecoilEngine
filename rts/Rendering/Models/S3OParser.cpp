@@ -124,7 +124,7 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 	piece->SetParentModel(model);
 
 	// retrieve vertices
-	piece->SetVertexCount(fp->numVertices);
+	piece->tmpVerts.resize(fp->numVertices);
 	for (int a = 0; a < fp->numVertices; ++a) {
 		Vertex* v = vertexList++;
 		v->swap();
@@ -142,13 +142,13 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 		sv.texCoords[0] = float2(v->texu, v->texv);
 		sv.texCoords[1] = float2(v->texu, v->texv);
 
-		piece->SetVertex(a, sv);
+		piece->tmpVerts[a] = sv;
 	}
 
 	// retrieve draw indices
-	piece->SetIndexCount(fp->vertexTableSize);
+	piece->tmpIndcs.resize(fp->vertexTableSize);
 	for (int a = 0; a < fp->vertexTableSize; ++a) {
-		piece->SetIndex(a, swabDWord(*(indexList++)));
+		piece->tmpIndcs[a] = swabDWord(*(indexList++));
 	}
 
 	// post process the piece
@@ -176,51 +176,51 @@ void SS3OPiece::Trianglize()
 		case S3O_PRIMTYPE_TRIANGLES: {
 		} break;
 		case S3O_PRIMTYPE_TRIANGLE_STRIP: {
-			if (indices.size() < 3) {
+			if (tmpIndcs.size() < 3) {
 				primType = S3O_PRIMTYPE_TRIANGLES;
-				indices.clear();
+				tmpIndcs.clear();
 				return;
 			}
 
-			decltype(indices) newIndices;
-			newIndices.resize(indices.size() * 3); // each index (can) create a new triangle
+			decltype(tmpIndcs) newIndices;
+			newIndices.resize(tmpIndcs.size() * 3); // each index (can) create a new triangle
 
-			for (size_t i = 0; (i + 2) < indices.size(); ++i) {
-				// indices can contain end-of-strip markers (-1U)
-				if (indices[i + 0] == -1 || indices[i + 1] == -1 || indices[i + 2] == -1)
+			for (size_t i = 0; (i + 2) < tmpIndcs.size(); ++i) {
+				// tmpIndcs can contain end-of-strip markers (-1U)
+				if (tmpIndcs[i + 0] == -1 || tmpIndcs[i + 1] == -1 || tmpIndcs[i + 2] == -1)
 					continue;
 
-				newIndices.push_back(indices[i + 0]);
-				newIndices.push_back(indices[i + 1]);
-				newIndices.push_back(indices[i + 2]);
+				newIndices.push_back(tmpIndcs[i + 0]);
+				newIndices.push_back(tmpIndcs[i + 1]);
+				newIndices.push_back(tmpIndcs[i + 2]);
 			}
 
 			primType = S3O_PRIMTYPE_TRIANGLES;
-			indices.swap(newIndices);
+			tmpIndcs.swap(newIndices);
 		} break;
 		case S3O_PRIMTYPE_QUADS: {
-			if (indices.size() % 4 != 0) {
+			if (tmpIndcs.size() % 4 != 0) {
 				primType = S3O_PRIMTYPE_TRIANGLES;
-				indices.clear();
+				tmpIndcs.clear();
 				return;
 			}
 
-			decltype(indices) newIndices;
-			const size_t oldCount = indices.size();
+			decltype(tmpIndcs) newIndices;
+			const size_t oldCount = tmpIndcs.size();
 			newIndices.resize(oldCount + oldCount / 2); // 4 indices become 6
 
-			for (size_t i = 0, j = 0; i < indices.size(); i += 4) {
-				newIndices[j++] = indices[i + 0];
-				newIndices[j++] = indices[i + 1];
-				newIndices[j++] = indices[i + 2];
+			for (size_t i = 0, j = 0; i < tmpIndcs.size(); i += 4) {
+				newIndices[j++] = tmpIndcs[i + 0];
+				newIndices[j++] = tmpIndcs[i + 1];
+				newIndices[j++] = tmpIndcs[i + 2];
 
-				newIndices[j++] = indices[i + 0];
-				newIndices[j++] = indices[i + 2];
-				newIndices[j++] = indices[i + 3];
+				newIndices[j++] = tmpIndcs[i + 0];
+				newIndices[j++] = tmpIndcs[i + 2];
+				newIndices[j++] = tmpIndcs[i + 3];
 			}
 
 			primType = S3O_PRIMTYPE_TRIANGLES;
-			indices.swap(newIndices);
+			tmpIndcs.swap(newIndices);
 		} break;
 
 		default: {
@@ -230,5 +230,5 @@ void SS3OPiece::Trianglize()
 
 void SS3OPiece::SetVertexTangents()
 {
-	ModelUtils::CalculateTangents(vertices, indices);
+	ModelUtils::CalculateTangents(tmpVerts, tmpIndcs);
 }

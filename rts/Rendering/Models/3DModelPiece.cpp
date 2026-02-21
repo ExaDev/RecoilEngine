@@ -62,7 +62,7 @@ void S3DModelPiece::CreateShatterPieces()
 	if (!HasGeometryData())
 		return;
 
-	shatterIndices.reserve(S3DModelPiecePart::SHATTER_VARIATIONS * indices.size());
+	shatterIndices.reserve(S3DModelPiecePart::SHATTER_VARIATIONS * tmpIndcs.size());
 
 	for (int i = 0; i < S3DModelPiecePart::SHATTER_VARIATIONS; ++i) {
 		CreateShatterPiecesVariation(i);
@@ -94,15 +94,15 @@ void S3DModelPiece::CreateShatterPiecesVariation(int num)
 	const auto GetPolygonDir = [&](size_t idx)
 	{
 		float3 midPos;
-		midPos += GetVertexPos(indices[idx + 0]);
-		midPos += GetVertexPos(indices[idx + 1]);
-		midPos += GetVertexPos(indices[idx + 2]);
+		midPos += tmpVerts[tmpIndcs[idx + 0]].pos;
+		midPos += tmpVerts[tmpIndcs[idx + 1]].pos;
+		midPos += tmpVerts[tmpIndcs[idx + 2]].pos;
 		midPos /= 3.0f;
 		return midPos.ANormalize();
 	};
 
 	// add vertices to splitter parts
-	for (size_t i = 0; i < indices.size(); i += 3) {
+	for (size_t i = 0; i < tmpIndcs.size(); i += 3) {
 		const float3& dir = GetPolygonDir(i);
 
 		// find the closest shatter part (the one that points into same dir)
@@ -124,13 +124,13 @@ void S3DModelPiece::CreateShatterPiecesVariation(int num)
 		assert(mcp);
 
 		//  + vertIndex will be added in void S3DModelVAO::ProcessIndicies(S3DModel* model)
-		(mcp->second).push_back(indices[i + 0]);
-		(mcp->second).push_back(indices[i + 1]);
-		(mcp->second).push_back(indices[i + 2]);
+		(mcp->second).push_back(tmpIndcs[i + 0]);
+		(mcp->second).push_back(tmpIndcs[i + 1]);
+		(mcp->second).push_back(tmpIndcs[i + 2]);
 	}
 
 	{
-		const size_t mapSize = indices.size();
+		const size_t mapSize = tmpIndcs.size();
 
 		uint32_t indxPos = 0;
 
@@ -207,18 +207,18 @@ Transform S3DModelPiece::ComposeTransform(const float3& t, const float3& r, floa
 
 void S3DModelPiece::SetEmitters()
 {
-	const auto vertCount = vertices.size();
+	const auto vertCount = tmpVerts.size();
 	if (vertCount == 0) {
 		emitPos = ZeroVector;
 		emitDir = FwdVector;
 	}
 	else if (vertCount == 1) {
 		emitPos = ZeroVector;
-		emitDir = GetVertexPos(0);
+		emitDir = tmpVerts[0].pos;
 	}
 	else {
-		emitPos = GetVertexPos(0);
-		emitDir = GetVertexPos(1) - GetVertexPos(0);
+		emitPos = tmpVerts[0].pos;
+		emitDir = tmpVerts[1].pos - tmpVerts[0].pos;
 	}
 	emitDir.SafeANormalize();
 }

@@ -39,11 +39,6 @@ public:
 		primType = S3O_PRIMTYPE_TRIANGLES;
 	}
 public:
-	void SetVertexCount(unsigned int n) { vertices.resize(n); }
-	void SetIndexCount(unsigned int n) { indices.resize(n); }
-	void SetVertex(int idx, const SVertexData& v) { vertices[idx] = v; }
-	void SetIndex(int idx, const unsigned int drawIdx) { indices[idx] = drawIdx; }
-
 	void Trianglize();
 	void SetVertexTangents();
 

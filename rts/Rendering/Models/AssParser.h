@@ -33,13 +33,6 @@ struct SAssPiece: public S3DModelPiece
 		#endif
 		return *this;
 	}
-
-	void Clear() override {
-		S3DModelPiece::Clear();
-
-		vertices.clear();
-		indices.clear();
-	}
 };
 
 

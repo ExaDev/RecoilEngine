@@ -81,7 +81,7 @@ void S3DModelVAO::ProcessVertices(const S3DModel* model)
 	uint32_t vertIndex = static_cast<uint32_t>(vertData.size());
 	for (auto* modelPiece : model->pieceObjects) {
 		modelPiece->vertIndex = vertIndex;
-		const auto& modelPieceVerts = modelPiece->GetVerticesVec();
+		const auto& modelPieceVerts = modelPiece->tmpVerts;
 		vertIndex += modelPieceVerts.size();
 		vertData.insert(vertData.end(), modelPieceVerts.begin(), modelPieceVerts.end()); //append
 	}
@@ -104,7 +104,7 @@ void S3DModelVAO::ProcessIndicies(S3DModel* model)
 			continue;
 		}
 
-		const auto& modelPieceIndcs = modelPiece->GetIndicesVec();
+		const auto& modelPieceIndcs = modelPiece->tmpIndcs;
 		indxData.insert(indxData.end(), modelPieceIndcs.begin(), modelPieceIndcs.end()); //append
 
 		const auto endIdx = indxData.end();
@@ -126,7 +126,7 @@ void S3DModelVAO::ProcessIndicies(S3DModel* model)
 		if (!modelPiece->HasGeometryData())
 			continue;
 
-		const auto& mdlPcsShatIndcs = modelPiece->GetShatterIndicesVec();
+		const auto& mdlPcsShatIndcs = modelPiece->shatterIndices;
 
 		indxData.insert(indxData.end(), mdlPcsShatIndcs.begin(), mdlPcsShatIndcs.end()); //append
 

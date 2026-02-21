@@ -513,10 +513,10 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 		if (piece->nodeIndex == GLTFPiece::INVALID_NODE_INDEX)
 			continue;
 
-		if (piece->GetVerticesVec().empty())
+		if (piece->tmpVerts.empty())
 			continue;
 
-		Impl::ReplaceNodeIndexWithPieceIndex(piece->GetVerticesVec(), nodeIdxToPieceIdx);
+		Impl::ReplaceNodeIndexWithPieceIndex(piece->tmpVerts, nodeIdxToPieceIdx);
 	}
 }
 
@@ -609,8 +609,8 @@ GLTFPiece* CGLTFParser::LoadPiece(S3DModel* model, GLTFPiece* parentPiece, const
 	if (!node.meshIndex.has_value())
 		return piece;
 
-	auto& verts = piece->GetVerticesVec();
-	auto& indcs = piece->GetIndicesVec();
+	auto& verts = piece->tmpVerts;
+	auto& indcs = piece->tmpIndcs;
 	const auto& mesh = asset.meshes[*node.meshIndex];
 	Impl::ReadGeometryData(asset, mesh.primitives, verts, indcs, nodeIndex, nullptr);
 

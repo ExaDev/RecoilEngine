@@ -36,7 +36,7 @@ FlyingPiece::FlyingPiece(
 , age(0)
 , piece(_piece)
 {
-	assert(piece->GetIndicesVec().size() % 3 == 0); // only triangles
+	assert(piece->tmpIndcs.size() % 3 == 0); // only triangles
 
 	InitCommon(pos, speed, _pieceParams.x, _renderParams.y, _renderParams.x);
 

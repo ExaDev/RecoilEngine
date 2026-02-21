@@ -25,8 +25,8 @@ struct S3DModelPiece {
 			p.renderData.clear();
 		}
 
-		vertices.clear();
-		indices.clear();
+		tmpVerts.clear();
+		tmpIndcs.clear();
 		shatterIndices.clear();
 
 		parent = nullptr;
@@ -53,10 +53,6 @@ struct S3DModelPiece {
 	const auto& GetEmitPos() const { return emitPos; }
 	const auto& GetEmitDir() const { return emitDir; }
 
-	// internal use
-	const auto& GetVertexPos(const int idx) const { return vertices[idx].pos; }
-	const auto& GetNormal(const int idx) const { return vertices[idx].normal; }
-
 	void DrawElements(uint32_t prim = 0x0004/*GL_TRIANGLES*/) const;
 	static void DrawShatterElements(uint32_t vboIndxStart, uint32_t vboIndxCount, uint32_t prim = 0x0004/*GL_TRIANGLES*/);
 public:
@@ -80,19 +76,11 @@ public:
 	const CollisionVolume* GetCollisionVolume() const { return &colvol; }
 	      CollisionVolume* GetCollisionVolume()       { return &colvol; }
 
-	bool HasGeometryData() const { return indices.size() >= 3; }
+	bool HasGeometryData() const { static_assert(false); return tmpIndcs.size() >= 3; }
 	void SetParentModel(S3DModel* model_) { model = model_; }
 	const S3DModel* GetParentModel() const { return model; }
 
 	void ReleaseShatterIndices();
-
-	const std::vector<SVertexData>& GetVerticesVec() const { return vertices; }
-	const std::vector<uint32_t>& GetIndicesVec() const { return indices; }
-	const std::vector<uint32_t>& GetShatterIndicesVec() const { return shatterIndices; }
-
-	std::vector<SVertexData>& GetVerticesVec() { return vertices; }
-	std::vector<uint32_t>& GetIndicesVec() { return indices; }
-	std::vector<uint32_t>& GetShatterIndicesVec() { return shatterIndices; }
 
 	bool HasBackedTra() const { return bakedTransform.has_value(); }
 
@@ -126,9 +114,10 @@ public:
 	uint32_t vertIndex = ~0u; // global vertex number offset
 	uint32_t indxStart = ~0u; // global Index VBO offset
 	uint32_t indxCount = ~0u;
-protected:
-	std::vector<SVertexData> vertices;
-	std::vector<uint32_t> indices;
+
+	// Temporary vertex and index data, cleared after upload to GPU
+	std::vector<SVertexData> tmpVerts;
+	std::vector<uint32_t> tmpIndcs;
 	std::vector<uint32_t> shatterIndices;
 
 	S3DModel* model = nullptr;

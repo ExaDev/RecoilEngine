@@ -86,8 +86,8 @@ struct S3DOPiece: public S3DModelPiece
 		verts.clear();
 		prims.clear();
 
-		vertices.clear();
-		indices.clear();
+		tmpVerts.clear();
+		tmpIndcs.clear();
 
 		emitPos = ZeroVector;
 		emitDir = ZeroVector;

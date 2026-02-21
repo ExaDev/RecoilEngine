@@ -366,7 +366,7 @@ S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::
 
 	piece->CalcNormals();
 	piece->Trianglize();
-	ModelUtils::CalculateTangents(piece->GetVerticesVec(), piece->GetIndicesVec());
+	ModelUtils::CalculateTangents(piece->tmpVerts, piece->tmpIndcs);
 
 	if (me.OffsetToChildObject > 0)
 		piece->children.push_back(LoadPiece(model, piece, buf, me.OffsetToChildObject));
@@ -385,8 +385,8 @@ void S3DOPiece::Trianglize()
 		return;
 
 	// assume all faces are quads
-	indices.reserve(prims.size() * 6);
-	vertices.reserve(prims.size() * 4);
+	tmpIndcs.reserve(prims.size() * 6);
+	tmpVerts.reserve(prims.size() * 4);
 
 	// trianglize all input
 	for (const S3DOPrimitive& ps: prims) {
@@ -394,40 +394,40 @@ void S3DOPiece::Trianglize()
 
 		if (ps.indices.size() == 4) {
 			// quad
-			indices.push_back(vertices.size() + 0);
-			indices.push_back(vertices.size() + 1);
-			indices.push_back(vertices.size() + 2);
-			indices.push_back(vertices.size() + 0);
-			indices.push_back(vertices.size() + 2);
-			indices.push_back(vertices.size() + 3);
-			vertices.emplace_back(verts[ps.indices[0]], ps.vnormals[0], float3{}, float3{}, float2(tex->xstart, tex->ystart), float2{});
-			vertices.emplace_back(verts[ps.indices[1]], ps.vnormals[1], float3{}, float3{}, float2(tex->xend,   tex->ystart), float2{});
-			vertices.emplace_back(verts[ps.indices[2]], ps.vnormals[2], float3{}, float3{}, float2(tex->xend,   tex->yend),   float2{});
-			vertices.emplace_back(verts[ps.indices[3]], ps.vnormals[3], float3{}, float3{}, float2(tex->xstart, tex->yend),   float2{});
+			tmpIndcs.push_back(tmpVerts.size() + 0);
+			tmpIndcs.push_back(tmpVerts.size() + 1);
+			tmpIndcs.push_back(tmpVerts.size() + 2);
+			tmpIndcs.push_back(tmpVerts.size() + 0);
+			tmpIndcs.push_back(tmpVerts.size() + 2);
+			tmpIndcs.push_back(tmpVerts.size() + 3);
+			tmpVerts.emplace_back(verts[ps.indices[0]], ps.vnormals[0], float3{}, float3{}, float2(tex->xstart, tex->ystart), float2{});
+			tmpVerts.emplace_back(verts[ps.indices[1]], ps.vnormals[1], float3{}, float3{}, float2(tex->xend,   tex->ystart), float2{});
+			tmpVerts.emplace_back(verts[ps.indices[2]], ps.vnormals[2], float3{}, float3{}, float2(tex->xend,   tex->yend),   float2{});
+			tmpVerts.emplace_back(verts[ps.indices[3]], ps.vnormals[3], float3{}, float3{}, float2(tex->xstart, tex->yend),   float2{});
 		} else if (ps.indices.size() == 3) {
 			// triangle
-			indices.push_back(vertices.size() + 0);
-			indices.push_back(vertices.size() + 1);
-			indices.push_back(vertices.size() + 2);
-			vertices.emplace_back(verts[ps.indices[0]], ps.vnormals[0], float3{}, float3{}, float2(tex->xstart, tex->ystart), float2{});
-			vertices.emplace_back(verts[ps.indices[1]], ps.vnormals[1], float3{}, float3{}, float2(tex->xend,   tex->ystart), float2{});
-			vertices.emplace_back(verts[ps.indices[2]], ps.vnormals[2], float3{}, float3{}, float2(tex->xend,   tex->yend),   float2{});
+			tmpIndcs.push_back(tmpVerts.size() + 0);
+			tmpIndcs.push_back(tmpVerts.size() + 1);
+			tmpIndcs.push_back(tmpVerts.size() + 2);
+			tmpVerts.emplace_back(verts[ps.indices[0]], ps.vnormals[0], float3{}, float3{}, float2(tex->xstart, tex->ystart), float2{});
+			tmpVerts.emplace_back(verts[ps.indices[1]], ps.vnormals[1], float3{}, float3{}, float2(tex->xend,   tex->ystart), float2{});
+			tmpVerts.emplace_back(verts[ps.indices[2]], ps.vnormals[2], float3{}, float3{}, float2(tex->xend,   tex->yend),   float2{});
 		} else if (ps.indices.size() >= 3) {
 			// fan
 			for (int i = 2; i < ps.indices.size(); ++i) {
-				indices.push_back(vertices.size() + 0);
-				indices.push_back(vertices.size() + i - 1);
-				indices.push_back(vertices.size() + i - 0);
+				tmpIndcs.push_back(tmpVerts.size() + 0);
+				tmpIndcs.push_back(tmpVerts.size() + i - 1);
+				tmpIndcs.push_back(tmpVerts.size() + i - 0);
 			}
 			for (int i = 0; i < ps.indices.size(); ++i) {
-				vertices.emplace_back(verts[ps.indices[i]], ps.vnormals[i], float3{}, float3{}, float2(tex->xstart, tex->ystart), float2{});
+				tmpVerts.emplace_back(verts[ps.indices[i]], ps.vnormals[i], float3{}, float3{}, float2(tex->xstart, tex->ystart), float2{});
 			}
 		}
 	}
 
 	// NOTE: wasteful to keep these around, but still needed (eg. for Shatter())
-	// vertices.clear();
-	// indices.clear();
+	// tmpVerts.clear();
+	// tmpIndcs.clear();
 }
 
 void S3DOPiece::CalcNormals()

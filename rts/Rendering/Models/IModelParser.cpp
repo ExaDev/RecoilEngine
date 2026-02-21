@@ -117,12 +117,12 @@ static void LoadDummyModel(S3DModel& model, int id)
 static void CheckPieceNormals(const S3DModel* model, const S3DModelPiece* modelPiece)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (auto vertCount = modelPiece->GetVerticesVec().size(); vertCount >= 3) {
+	if (auto vertCount = modelPiece->tmpVerts.size(); vertCount >= 3) {
 		// do not check pseudo-pieces
 		unsigned int numNullNormals = 0;
 
 		for (unsigned int n = 0; n < vertCount; n++) {
-			numNullNormals += (modelPiece->GetNormal(n).SqLength() < 0.5f);
+			numNullNormals += (modelPiece->tmpVerts[n].normal.SqLength() < 0.5f);
 		}
 
 		if (numNullNormals > 0) {
@@ -445,8 +445,8 @@ void CModelLoader::PostProcessGeometry(S3DModel* model)
 
 		// Calculate tangents for pieces with geometry
 		if (p->HasGeometryData()) {
-			auto& verts = p->GetVerticesVec();
-			auto& indcs = p->GetIndicesVec();
+		auto& verts = p->tmpVerts;
+		auto& indcs = p->tmpIndcs;
 			if (!verts.empty() && !indcs.empty()) {
 				ModelUtils::CalculateTangents(verts, indcs);
 			}

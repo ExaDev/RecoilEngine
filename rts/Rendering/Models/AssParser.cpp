@@ -760,8 +760,8 @@ void CAssParser::LoadPieceGeometry(SAssPiece* piece, const S3DModel* model, cons
             (mesh->HasTangentsAndBitangents() ? "Y" : "N"),
             (mesh->HasTextureCoords(0) ? "Y" : "N"));
 
-        auto& verts = piece->GetVerticesVec();
-        auto& indcs = piece->GetIndicesVec();
+        auto& verts = piece->tmpVerts;
+        auto& indcs = piece->tmpIndcs;
 
         verts.reserve(verts.size() + mesh->mNumVertices);
         indcs.reserve(indcs.size() + mesh->mNumFaces * 3);
