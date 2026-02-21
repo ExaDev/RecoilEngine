@@ -43,9 +43,6 @@ struct S3DModelPiece {
 
 		aabb.Reset();
 
-		vertOffset = ~0u;
-		vertCount = 0;
-
 		vertIndex = ~0u;
 		indxStart = ~0u;
 		indxCount = ~0u;
@@ -89,8 +86,6 @@ public:
 
 	void ReleaseShatterIndices();
 
-	void SetMinMaxExtends();
-
 	const std::vector<SVertexData>& GetVerticesVec() const { return vertices; }
 	const std::vector<uint32_t>& GetIndicesVec() const { return indices; }
 	const std::vector<uint32_t>& GetShatterIndicesVec() const { return shatterIndices; }
@@ -127,9 +122,6 @@ public:
 	float scale{1.0f};  /// baked uniform scaling factor (assimp-only)
 
 	AABB aabb;
-
-	uint32_t vertOffset = ~0u;
-	uint32_t vertCount  = 0;
 
 	uint32_t vertIndex = ~0u; // global vertex number offset
 	uint32_t indxStart = ~0u; // global Index VBO offset

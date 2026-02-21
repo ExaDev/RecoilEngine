@@ -1,5 +1,6 @@
 #include "ModelUtils.h"
 
+#include <ranges>
 #include <cassert>
 #include <string>
 #include <numeric>
@@ -62,6 +63,25 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
+	// Reserve space
+	{
+		const auto totalVerts = std::ranges::fold_left(
+			model->pieceObjects, model->skinnedMesh.verts.size(),
+			[](auto acc, auto* piece) {
+				return acc + piece->GetVerticesVec().size();
+			}
+		);
+		const auto totalIndcs = std::ranges::fold_left(
+			model->pieceObjects, model->skinnedMesh.indcs.size(),
+			[](auto acc, auto* piece) {
+				return acc + piece->GetIndicesVec().size();
+			}
+		);
+
+		model->skinnedMesh.verts.reserve(totalVerts);
+		model->skinnedMesh.indcs.reserve(totalIndcs);
+	}
+
 	for (size_t pieceIdx = 0; pieceIdx < model->pieceObjects.size(); ++pieceIdx) {
 		auto* piece = model->pieceObjects[pieceIdx];
 		piece->SetEmitters();
@@ -73,10 +93,6 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 		auto& pieceIndcs = piece->GetIndicesVec();
 
 		const auto vertOffset = model->skinnedMesh.verts.size();
-
-		// Reserve space
-		model->skinnedMesh.verts.reserve(vertOffset + pieceVerts.size());
-		model->skinnedMesh.indcs.reserve(model->skinnedMesh.indcs.size() + pieceIndcs.size());
 
 		// Transform verts
 		for (const auto& vert : pieceVerts) {

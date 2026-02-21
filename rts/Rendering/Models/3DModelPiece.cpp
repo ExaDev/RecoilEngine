@@ -205,17 +205,9 @@ Transform S3DModelPiece::ComposeTransform(const float3& t, const float3& r, floa
 	return tra;
 }
 
-void S3DModelPiece::SetMinMaxExtends()
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	for (const auto& vp : vertices) {
-		aabb.AddPoint(vp.pos);
-	}
-}
-
-
 void S3DModelPiece::SetEmitters()
 {
+	const auto vertCount = vertices.size();
 	if (vertCount == 0) {
 		emitPos = ZeroVector;
 		emitDir = FwdVector;
@@ -228,7 +220,7 @@ void S3DModelPiece::SetEmitters()
 		emitPos = GetVertexPos(0);
 		emitDir = GetVertexPos(1) - GetVertexPos(0);
 	}
-	emitDir.Normalize();
+	emitDir.SafeANormalize();
 }
 
 void S3DModelPiece::DrawElements(GLuint prim) const

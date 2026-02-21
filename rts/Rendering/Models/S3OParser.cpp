@@ -54,7 +54,6 @@ void CS3OParser::Load(S3DModel& model, const std::string& name)
 	model.numPieces = 0;
 	model.texs[0] = (header.texture1 == 0)? "" : (char*) &fileBuf[header.texture1];
 	model.texs[1] = (header.texture2 == 0)? "" : (char*) &fileBuf[header.texture2];
-	model.aabb.Reset();
 
 	textureHandlerS3O.PreloadTexture(
 		&model,
@@ -156,9 +155,6 @@ SS3OPiece* CS3OParser::LoadPiece(S3DModel* model, SS3OPiece* parent, std::vector
 	{
 		piece->Trianglize();
 		piece->SetVertexTangents();
-		piece->SetMinMaxExtends();
-
-		piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 	}
 
 	// load children pieces

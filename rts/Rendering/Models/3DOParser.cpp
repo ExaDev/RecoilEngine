@@ -169,7 +169,6 @@ void C3DOParser::Load(S3DModel& model, const std::string& name)
 	model.type = MODELTYPE_3DO;
 	model.textureType = 0;
 	model.numPieces   = 0;
-	model.aabb.Reset();
 
 	model.FlattenPieceTree(LoadPiece(&model, nullptr, fileBuf, 0));
 	model.SetPieceMatrices();
@@ -368,9 +367,6 @@ S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::
 	piece->CalcNormals();
 	piece->Trianglize();
 	ModelUtils::CalculateTangents(piece->GetVerticesVec(), piece->GetIndicesVec());
-	piece->SetMinMaxExtends();
-
-	piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
 	if (me.OffsetToChildObject > 0)
 		piece->children.push_back(LoadPiece(model, piece, buf, me.OffsetToChildObject));

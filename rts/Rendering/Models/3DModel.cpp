@@ -139,6 +139,13 @@ void S3DModel::FinalizeLoad()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 
+	// cache inverse bpose transforms for all pieces
+	std::vector<Transform> invBposeTransforms;
+	invBposeTransforms.reserve(pieceObjects.size());
+	for (const auto* piece : pieceObjects) {
+		invBposeTransforms.push_back(piece->bposeTransform.InvertAffine());
+	}
+
 	aabb.Reset();
 	for (const auto& vert : skinnedMesh.verts) {
 		aabb.AddPoint(vert.pos);
@@ -148,13 +155,15 @@ void S3DModel::FinalizeLoad()
 		assert(pieceIdx < pieceObjects.size());
 
 		auto* piece = pieceObjects[pieceIdx];
-		const Transform invBpose = piece->bposeTransform.InvertAffine();
-		const auto localPos = invBpose * float4{ vert.pos, 1.0f };
+		const auto localPos = invBposeTransforms[pieceIdx] * float4{ vert.pos, 1.0f };
 		piece->aabb.AddPoint(localPos);
 	}
 
 	auto TraversePieceTree = [](this auto&& self, S3DModelPiece* piece) -> void {
-		piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
+		if (piece->aabb.IsReset())
+			piece->SetCollisionVolume(CollisionVolume('b', 'z', ZeroVector, ZeroVector));
+		else
+			piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
 		for (S3DModelPiece* childPiece : piece->children) {
 			self(childPiece);

@@ -458,7 +458,6 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 	model.name = modelFilePath;
 	model.type = MODELTYPE_ASS; // Revise?
 	model.numPieces = 0;
-	model.aabb.Reset();
 
 	// GLTF model MUST be exported with Z axis UP. We will rotate it here by ourselves
 	const auto initTransform = (modelParams.s3oCompat.value_or(false)) ?
