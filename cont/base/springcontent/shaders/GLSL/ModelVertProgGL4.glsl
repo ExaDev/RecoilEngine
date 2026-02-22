@@ -273,17 +273,21 @@ void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
 
 	uint bID0 = UnpackBoneID(0u);
 	
-	Transform tx;
+	// Get bind pose transform for the primary bone
+	Transform bposeTx = transforms[instData.w + bID0];
+	Transform bposeInvTx = InvertTransformAffine(bposeTx);
+
+	// Get current piece transform
+	Transform currentTx;
 	if (staticModel) {
-		tx = transforms[instData.x + bID0];
+		currentTx = transforms[instData.x + bID0];
 	} else {
 		// do interpolation
-		tx = Lerp(
+		currentTx = Lerp(
 			transforms[instData.x + 2u * (1u + bID0) + 0u],
 			transforms[instData.x + 2u * (1u + bID0) + 1u],
 			timeInfo.w
 		);
-		//tx = transforms[instData.x + 2u * (1u + bID0) + 1u];
 	}
 
 	vec4 weights = vec4(
@@ -291,10 +295,14 @@ void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
 		float(GetBoneWeight(1u)) / 255.0,
 		float(GetBoneWeight(2u)) / 255.0,
 		float(GetBoneWeight(3u)) / 255.0
-	) * float(tx.trSc.w > 0.0);
+	) * float(currentTx.trSc.w > 0.0);
 
-	msPosition = ApplyTransform(tx, piecePos);
-	msNormal   = ApplyTransform(tx, normal4).xyz;
+	// Delta transform: current * inverse(bpose)
+	// This transforms from model-space (bpose) to animated model-space
+	Transform deltaTx = ApplyTransform(currentTx, bposeInvTx);
+
+	msPosition = ApplyTransform(deltaTx, piecePos);
+	msNormal   = ApplyTransform(deltaTx, normal4).xyz;
 
 	if (staticModel || weights[0] == 1.0)
 		return;
@@ -302,9 +310,9 @@ void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
 	msPosition *= weights[0];
 	msNormal   *= weights[0];
 
-	Transform bposeTra = transforms[instData.w + bID0];
-
-	// Vertex[ModelSpace,BoneX] = PieceMat[BoneX] * InverseBindPosMat[BoneX] * BindPosMat[Bone0] * Vertex[Bone0]
+	// Multi-bone skinning
+	// For model-space vertices, we need: boneTx * bposeInv * vertexInModelSpace
+	// NOT: boneTx * bposeInv * bpose0 * vertex (the old formula)
 	for (uint bi = 1; bi < 4; ++bi) {
 		uint bID = UnpackBoneID(bi);
 
@@ -318,11 +326,10 @@ void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
 			timeInfo.w
 		);
 
-		// emulate boneTx * bposeInvTra * bposeTra * piecePos
-		vec4 txPiecePos = ApplyTransform(ApplyTransform(boneTx, ApplyTransform(bposeInvTra, bposeTra)), piecePos);
-
-		// emulate boneTx * bposeInvTra * bposeTra * normal
-		vec3 txPieceNormal = ApplyTransform(ApplyTransform(boneTx, ApplyTransform(bposeInvTra, bposeTra)), normal4).xyz;
+		// For model-space vertices: boneTx * bposeInvTra * piecePos
+		// This transforms the model-space vertex to the space of bone bi
+		vec4 txPiecePos = ApplyTransform(ApplyTransform(boneTx, bposeInvTra), piecePos);
+		vec3 txPieceNormal = ApplyTransform(ApplyTransform(boneTx, bposeInvTra), normal4).xyz;
 
 		msPosition += txPiecePos    * weights[bi];
 		msNormal   += txPieceNormal * weights[bi];

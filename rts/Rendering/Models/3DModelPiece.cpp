@@ -18,15 +18,10 @@ void S3DModelPiece::DrawStaticLegacy(bool bind, bool bindPosMat) const
 
 	if (bind) S3DModelHelpers::BindLegacyAttrVBOs();
 
-	if (bindPosMat) {
-		glPushMatrix();
-		glMultMatrixf(bposeTransform.ToMatrix());
-		DrawElements();
-		glPopMatrix();
-	}
-	else {
-		DrawElements();
-	}
+	// Note: bindPosMat is now ignored because vertices are already in model space
+	// The bposeTransform was already applied during TransferPiecesToSkinnedMesh()
+	// For static rendering, we don't need any additional transform
+	DrawElements();
 
 	if (bind) S3DModelHelpers::UnbindLegacyAttrVBOs();
 }
@@ -180,6 +175,7 @@ void S3DModelPiece::Shatter(float pieceChance, int modelType, int texType, int t
 void S3DModelPiece::SetPieceTransform(const Transform& parentTra)
 {
 	bposeTransform = parentTra * ComposeTransform(offset, ZeroVector, scale);
+	bposeTransformInv = bposeTransform.InvertAffine();
 
 	for (S3DModelPiece* c : children) {
 		c->SetPieceTransform(bposeTransform);

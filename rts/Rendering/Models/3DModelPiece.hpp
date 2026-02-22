@@ -33,6 +33,7 @@ struct S3DModelPiece {
 		colvol = {};
 
 		bposeTransform.LoadIdentity();
+		bposeTransformInv.LoadIdentity();
 
 		emitPos = ZeroVector;
 		emitDir = ZeroVector;
@@ -98,6 +99,8 @@ public:
 
 	// bind-pose transform, including baked rots
 	Transform bposeTransform;
+	// inverse of bposeTransform, cached for delta transform calculations
+	Transform bposeTransformInv;
 
 	// baked local-space rotations
 	std::optional<Transform> bakedTransform;
