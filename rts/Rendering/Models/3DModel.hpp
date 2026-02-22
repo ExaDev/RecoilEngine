@@ -66,7 +66,6 @@ struct S3DModel
 	void SetPieceMatrices();
 
 	void FlattenPieceTree(S3DModelPiece* root);
-
 	void FinalizeLoad();
 
 	// default values set by parsers; radius is also cached in WorldObject::drawRadius (used by projectiles)
@@ -109,7 +108,7 @@ public:
 	// Skinned mesh data (for models with bone-based skinning)
 	std::vector<SVertexData> skinnedVerts;
 	std::vector<uint32_t> skinnedIndcs;
-	std::vector<uint32_t> shIndcs;
+	std::vector<uint32_t> shatterIndcs;
 	// needs to be stored so it can be processed after the model is loaded
 	ModelUtils::ModelParams modelParams;
 private:

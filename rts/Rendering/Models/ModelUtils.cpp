@@ -21,7 +21,6 @@ void ModelUtils::CalculateModelProperties(S3DModel* model)
 	const auto& modelParams = model->modelParams;
 
 	// Note the content from Lua table will overwrite whatever has already been defined in modelParams
-
 	model->aabb.mins = modelParams.mins.value_or(model->aabb.mins);
 	model->aabb.maxs = modelParams.maxs.value_or(model->aabb.maxs);
 
@@ -78,16 +77,9 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 			}
 		);
 
-		const auto totalShIndcs = std::ranges::fold_left(
-			model->pieceObjects, model->shIndcs.size(),
-			[](auto acc, auto* piece) {
-				return acc + piece->tmpShIndcs.size();
-			}
-		);
-
 		model->skinnedVerts.reserve(totalVerts);
 		model->skinnedIndcs.reserve(totalIndcs);
-		model->shIndcs.reserve(totalShIndcs);
+		model->shatterIndcs.reserve(totalIndcs * S3DModelPiecePart::SHATTER_VARIATIONS);
 	}
 
 	for (size_t pieceIdx = 0; pieceIdx < model->pieceObjects.size(); ++pieceIdx) {
@@ -96,24 +88,24 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 		auto& pieceVerts = piece->tmpVerts;
 		auto& pieceIndcs = piece->tmpIndcs;
 
-		// Record relative offset and count for this piece in skinnedVerts/skinnedIndcs
-		piece->relVertOff = static_cast<uint32_t>(model->skinnedVerts.size());
+		// Record count for this piece in skinnedVerts/skinnedIndcs, which will be used for piece->HasGeometryData() and piece->SetEmitters()
 		piece->relVertCnt = static_cast<uint32_t>(pieceVerts.size());
-		piece->relIndxOff = static_cast<uint32_t>(model->skinnedIndcs.size());
 		piece->relIndxCnt = static_cast<uint32_t>(pieceIndcs.size());
-		piece->relShIndxOff = static_cast<uint32_t>(model->shIndcs.size());
-		// relShIndxCnt will be set after CreateShatterPieces()
 
 		piece->SetEmitters();
+
 		if (!piece->HasGeometryData())
 			continue;
 
 		// Create shatter pieces first - this populates piece->tmpShIndcs
 		piece->CreateShatterPieces();
 
-		// Now record shatter index count after CreateShatterPieces() populated tmpShIndcs
+		// Record relative offset for this piece in skinnedVerts/skinnedIndcs/shatterIndcs
+		piece->relVertOff = static_cast<uint32_t>(model->skinnedVerts.size());
+		piece->relIndxOff = static_cast<uint32_t>(model->skinnedIndcs.size());
+		piece->relShIndxOff = static_cast<uint32_t>(model->shatterIndcs.size());
+
 		auto& pieceShIndcs = piece->tmpShIndcs;
-		piece->relShIndxCnt = static_cast<uint32_t>(pieceShIndcs.size());
 
 		// Transform verts
 		for (const auto& vert : pieceVerts) {
@@ -126,19 +118,19 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 		}
 
 		// Copy and adjust indices
-		for (auto idx : pieceIndcs) {
-			model->skinnedIndcs.emplace_back(static_cast<uint32_t>(piece->relVertOff + idx));
-		}
+		model->skinnedIndcs.append_range(
+			pieceIndcs | std::views::transform([baseVertNum = piece->relVertOff](auto v) { return baseVertNum + v; }) // add baseVertNum to indices
+		);
 
 		// Copy and adjust shatter indices
-		for (auto idx : pieceShIndcs) {
-			model->shIndcs.emplace_back(static_cast<uint32_t>(piece->relVertOff + idx));
-		}
+		model->shatterIndcs.append_range(
+			pieceShIndcs | std::views::transform([baseVertNum = piece->relVertOff](auto v) { return baseVertNum + v; }) // add baseVertNum to indices
+		);
 
 		// makes no sense to keep them?
-		pieceVerts.clear();
-		pieceIndcs.clear();
-		pieceShIndcs.clear();
+		pieceVerts = {};
+		pieceIndcs = {};
+		pieceShIndcs = {};
 	}
 }
 

@@ -78,7 +78,7 @@ void S3DModelVAO::AddModelGeometry(S3DModel* model)
 
 	auto& skinnedVerts = model->skinnedVerts;
 	auto& skinnedIndcs = model->skinnedIndcs;
-	auto& shIndcs = model->shIndcs;
+	auto& shatterIndcs = model->shatterIndcs;
 
 	vertData.append_range(skinnedVerts);
 
@@ -91,12 +91,12 @@ void S3DModelVAO::AddModelGeometry(S3DModel* model)
 
 	// Add shatter indices to the end of indxData
 	indxData.append_range(
-		shIndcs | std::views::transform([baseVertNum](auto v) { return baseVertNum + v; })
+		shatterIndcs | std::views::transform([baseVertNum](auto v) { return baseVertNum + v; })
 	);
 
 	skinnedVerts.clear();
 	skinnedIndcs.clear();
-	shIndcs.clear();
+	shatterIndcs.clear();
 }
 
 void S3DModelVAO::CreateVAO()

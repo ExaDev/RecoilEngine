@@ -42,7 +42,7 @@ S3DModel& S3DModel::operator= (S3DModel&& m) noexcept {
 
 	skinnedVerts = std::move(m.skinnedVerts);
 	skinnedIndcs = std::move(m.skinnedIndcs);
-	shIndcs = std::move(m.shIndcs);
+	shatterIndcs = std::move(m.shatterIndcs);
 	modelParams = std::move(m.modelParams);
 
 	std::swap(traAlloc, m.traAlloc);

@@ -18,16 +18,16 @@ struct S3DModelPiece {
 	S3DModelPiece() = default;
 
 	virtual void Clear() {
-		name.clear();
-		children.clear();
+		name = {};
+		children = {};
 
 		for (S3DModelPiecePart& p : shatterParts) {
-			p.renderData.clear();
+			p.renderData = {};
 		}
 
-		tmpVerts.clear();
-		tmpIndcs.clear();
-		tmpShIndcs.clear();
+		tmpVerts = {};
+		tmpIndcs = {};
+		tmpShIndcs = {};
 
 		parent = nullptr;
 		colvol = {};
@@ -49,7 +49,6 @@ struct S3DModelPiece {
 		relIndxOff = ~0u;
 		relIndxCnt = 0;
 		relShIndxOff = ~0u;
-		relShIndxCnt = 0;
 	}
 
 	void SetEmitters();
@@ -121,7 +120,6 @@ public:
 	uint32_t relIndxOff = ~0u;
 	uint32_t relIndxCnt = 0;
 	uint32_t relShIndxOff = ~0u;
-	uint32_t relShIndxCnt = 0;
 
 	// Temporary vertex and index data, cleared after upload to GPU
 	std::vector<SVertexData> tmpVerts;

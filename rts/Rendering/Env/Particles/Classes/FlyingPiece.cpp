@@ -232,14 +232,25 @@ void FlyingPiece::Draw(const FlyingPiece* prev) const
 	const float3 dragFactors = GetDragFactors(); // speedDrag, gravityDrag, interAge
 
 	for (auto& cp: splitterParts) {
+		if (!cp.indexCount)
+			continue;
+
 		glPushMatrix();
 		glMultMatrixf(GetMatrixOf(cp, dragFactors));
-		assert(piece->relShIndxCnt != ~0u);
 		// Shatter indices come after all regular indices in the global buffer
 		// Global offset = model's global offset + model's regular index count + piece's shatter index offset
-		const auto* pieceModel = piece->GetParentModel();
-		const uint32_t indxOffset = pieceModel->indxStart + pieceModel->indxCount + piece->relShIndxOff;
-		S3DModelPiece::DrawShatterElements(indxOffset + cp.indexStart, cp.indexCount);
+		const auto* model = piece->GetParentModel();
+
+		// shatter indices are stored right after regular ones
+		//   model->indxStart + model->indxCount - defines where the shatter indices start for the model
+		//   piece->relIndxOff * S3DModelPiecePart::SHATTER_VARIATIONS - defines where the shatter indices start for the piece, relative to the model's shatter index start
+		//   (shatter indices are always times S3DModelPiecePart::SHATTER_VARIATIONS, compared to normal indices)
+		const uint32_t baseOffset =
+			model->indxStart + model->indxCount + piece->relIndxOff * S3DModelPiecePart::SHATTER_VARIATIONS;
+
+		//piece->relShIndxOff
+
+		S3DModelPiece::DrawShatterElements(baseOffset + cp.indexStart, cp.indexCount);
 		glPopMatrix();
 	}
 }
