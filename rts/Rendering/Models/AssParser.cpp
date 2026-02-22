@@ -145,6 +145,11 @@ public:
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace Impl {
+	struct MeshData {
+		std::vector<SVertexData> verts;
+		std::vector<uint32_t> indcs;
+	};
+
 	template<typename PieceObject>
 	void LoadPieceTransformations(
 		PieceObject* piece,
@@ -311,10 +316,10 @@ namespace Impl {
 		return transforms;
 	}
 
-	std::vector<Skinning::SkinnedMesh> GetModelSpaceMeshes(const aiScene* scene, const S3DModel* model)
+	std::vector<MeshData> GetModelSpaceMeshes(const aiScene* scene, const S3DModel* model)
 	{
 		RECOIL_DETAILED_TRACY_ZONE;
-		std::vector<Skinning::SkinnedMesh> meshes;
+		std::vector<MeshData> meshes;
 
 		// Pre-compute all node transforms in a single pass
 		const auto nodeTransforms = GetNodeTransforms(scene);
@@ -334,9 +339,9 @@ namespace Impl {
 
 			auto& [verts, indcs] = meshes.emplace_back();
 
-			LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Fetching mesh %d from scene", meshIndex);
+			LOG_SL(LOG_SECTION_PIECE, L_DEBUG, "Fetching mesh %u from scene", meshIndex);
 			LOG_SL(LOG_SECTION_PIECE, L_DEBUG,
-				"Processing vertices for mesh %d (%d vertices)",
+				"Processing vertices for mesh %u (%u vertices)",
 				meshIndex, mesh->mNumVertices);
 			LOG_SL(LOG_SECTION_PIECE, L_DEBUG,
 				"Normals: %s Tangents/Bitangents: %s TexCoords: %s",
@@ -355,7 +360,8 @@ namespace Impl {
 				for (uint32_t weightIndex = 0; weightIndex < bone->mNumWeights; weightIndex++) {
 					const auto& vertIndex = bone->mWeights[weightIndex].mVertexId;
 					const auto& vertWeight = bone->mWeights[weightIndex].mWeight;
-					const std::string boneName = std::string(bone->mName.data);
+					const std::string boneName = std::string(bone->mName.C_Str());
+
 
 					auto boneID = spring::SafeCast<uint16_t>(model->FindPieceOffset(boneName));
 					assert(boneID < INV_PIECE_NUM); // == INV_PIECE_NUM - invalid piece
@@ -367,7 +373,7 @@ namespace Impl {
 			for (auto& vertexWeight : vertexWeights) {
 				std::stable_sort(vertexWeight.begin(), vertexWeight.end(), [](const auto& lhs, const auto& rhs) {
 					return std::forward_as_tuple(lhs.second, lhs.first) > std::forward_as_tuple(rhs.second, rhs.first);
-					});
+				});
 				vertexWeight.resize(4, std::make_pair(SVertexData::INVALID_BONEID, 0.0f));
 			}
 
@@ -604,16 +610,16 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 	// Update piece hierarchy based on metadata
 	BuildPieceHierarchy(&model, pieceMap, parentMap);
 
-	// skinning support - save mesh data directly to model.skinnedMesh
+	// skinning support - save mesh data directly to model.skinnedVerts/skinnedIndcs
 	if (!meshNames.empty()) {
 		const auto meshes = Impl::GetModelSpaceMeshes(scene, &model);
 
-		// Merge all skinned meshes into model.skinnedMesh
+		// Merge all skinned meshes into model.skinnedVerts/skinnedIndcs
 		for (const auto& mesh : meshes) {
-			const auto vertOffset = model.skinnedMesh.verts.size();
-			model.skinnedMesh.verts.insert(model.skinnedMesh.verts.end(), mesh.verts.begin(), mesh.verts.end());
+			const auto vertOffset = model.skinnedVerts.size();
+			model.skinnedVerts.insert(model.skinnedVerts.end(), mesh.verts.begin(), mesh.verts.end());
 			for (const auto& indx : mesh.indcs) {
-				model.skinnedMesh.indcs.push_back(static_cast<uint32_t>(vertOffset + indx));
+				model.skinnedIndcs.push_back(static_cast<uint32_t>(vertOffset + indx));
 			}
 		}
 	}

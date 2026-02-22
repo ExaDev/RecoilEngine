@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <ranges>
 
 #include "3DModel.hpp"
 #include "3DModelPiece.hpp"
@@ -69,72 +70,33 @@ S3DModelVAO::S3DModelVAO()
 
 std::unique_ptr<S3DModelVAO> S3DModelVAO::instance = nullptr;
 
-void S3DModelVAO::ProcessVertices(const S3DModel* model)
+void S3DModelVAO::AddModelGeometry(S3DModel* model)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	assert(model);
-	assert(model->loadStatus == S3DModel::LoadStatus::LOADING);
 
-	if (const auto* root = model->GetRootPiece(); root->vertIndex != ~0u)
-		return;
+	const auto baseVertNum = static_cast<uint32_t>(vertData.size());
 
-	uint32_t vertIndex = static_cast<uint32_t>(vertData.size());
-	for (auto* modelPiece : model->pieceObjects) {
-		modelPiece->vertIndex = vertIndex;
-		const auto& modelPieceVerts = modelPiece->tmpVerts;
-		vertIndex += modelPieceVerts.size();
-		vertData.insert(vertData.end(), modelPieceVerts.begin(), modelPieceVerts.end()); //append
-	}
-}
+	auto& skinnedVerts = model->skinnedVerts;
+	auto& skinnedIndcs = model->skinnedIndcs;
+	auto& shIndcs = model->shIndcs;
 
-void S3DModelVAO::ProcessIndicies(S3DModel* model)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	assert(model);
-	if (model->indxStart != ~0u)
-		return;
+	vertData.append_range(skinnedVerts);
 
-	//models should know their index offset
-	model->indxStart = static_cast<uint32_t>(std::distance(indxData.cbegin(), indxData.cend()));
+	model->indxStart = static_cast<uint32_t>(indxData.size());
+	model->indxCount = static_cast<uint32_t>(skinnedIndcs.size());
 
-	for (auto* modelPiece : model->pieceObjects) {
-		if (!modelPiece->HasGeometryData()) {
-			modelPiece->indxStart = static_cast<uint32_t>(indxData.size());
-			modelPiece->indxCount = 0;
-			continue;
-		}
+	indxData.append_range(
+		skinnedIndcs | std::views::transform([baseVertNum](auto v) { return baseVertNum + v; }) // add baseVertNum to indices
+	);
 
-		const auto& modelPieceIndcs = modelPiece->tmpIndcs;
-		indxData.insert(indxData.end(), modelPieceIndcs.begin(), modelPieceIndcs.end()); //append
+	// Add shatter indices to the end of indxData
+	indxData.append_range(
+		shIndcs | std::views::transform([baseVertNum](auto v) { return baseVertNum + v; })
+	);
 
-		const auto endIdx = indxData.end();
-		const auto begIdx = endIdx - modelPieceIndcs.size();
-
-		std::for_each(begIdx, endIdx, [offset = modelPiece->vertIndex](uint32_t& indx) { indx += offset; }); // add per piece vertex offset to indices
-
-		//model pieces should know their index offset
-		modelPiece->indxStart = static_cast<uint32_t>(std::distance(indxData.begin(), begIdx));
-
-		//model pieces should know their index count
-		modelPiece->indxCount = static_cast<uint32_t>(modelPieceIndcs.size());
-	}
-	//models should know their index count
-	model->indxCount = static_cast<uint32_t>(indxData.size() - model->indxStart);
-
-	//add shatter indices to the end of indxData
-	for (const auto* modelPiece : model->pieceObjects) {
-		if (!modelPiece->HasGeometryData())
-			continue;
-
-		const auto& mdlPcsShatIndcs = modelPiece->shatterIndices;
-
-		indxData.insert(indxData.end(), mdlPcsShatIndcs.begin(), mdlPcsShatIndcs.end()); //append
-
-		const auto endIdx = indxData.end();
-		const auto begIdx = endIdx - mdlPcsShatIndcs.size();
-
-		std::for_each(begIdx, endIdx, [offset = modelPiece->vertIndex](uint32_t& indx) { indx += offset; }); // add per piece vertex offset to indices
-	}
+	skinnedVerts.clear();
+	skinnedIndcs.clear();
+	shIndcs.clear();
 }
 
 void S3DModelVAO::CreateVAO()

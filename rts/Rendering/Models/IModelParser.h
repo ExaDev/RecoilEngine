@@ -53,7 +53,7 @@ private:
 	void KillModels();
 	void KillParsers() const;
 
-	void PostProcessGeometry(S3DModel* o);
+	void AddGeometryToVBO(S3DModel* o);
 	void Upload(S3DModel* o) const;
 
 private:

@@ -114,35 +114,6 @@ static void LoadDummyModel(S3DModel& model, int id)
 	LoadDummyModel(model);
 }
 
-static void CheckPieceNormals(const S3DModel* model, const S3DModelPiece* modelPiece)
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	if (auto vertCount = modelPiece->tmpVerts.size(); vertCount >= 3) {
-		// do not check pseudo-pieces
-		unsigned int numNullNormals = 0;
-
-		for (unsigned int n = 0; n < vertCount; n++) {
-			numNullNormals += (modelPiece->tmpVerts[n].normal.SqLength() < 0.5f);
-		}
-
-		if (numNullNormals > 0) {
-			constexpr const char* formatStr =
-				"[%s] piece \"%s\" of model \"%s\" has %u (of %u) normals with invalid length (<0.5)";
-
-			const char* modelName = model->name.c_str();
-			const char* pieceName = modelPiece->name.c_str();
-
-			LOG_L(L_DEBUG, formatStr, __func__, pieceName, modelName, static_cast<uint32_t>(numNullNormals), static_cast<uint32_t>(vertCount));
-		}
-	}
-
-	for (const S3DModelPiece* childPiece: modelPiece->children) {
-		CheckPieceNormals(model, childPiece);
-	}
-}
-
-
-
 void CModelLoader::Init()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -293,7 +264,7 @@ S3DModel* CModelLoader::LoadModel(std::string name, bool preload)
 	assert(model);
 	if (load) {
 		FillModel(*model, name, FindModelPath(name));
-		cv.notify_all();
+		//cv.notify_all();
 	}
 
 	auto lock = CModelsLock::GetUniqueLock();
@@ -365,12 +336,13 @@ void CModelLoader::FillModel(
 
 	// Transform the piece vertices / indices to skins
 	ModelUtils::TransferPiecesToSkinnedMesh(&model);
+	ModelUtils::CheckNormalAndTangent(&model);
 
 	// will also calculate pieces / model bounding box
 	ModelUtils::CalculateModelProperties(&model);
 	ModelLog::LogModelProperties(model);
 
-	PostProcessGeometry(&model);
+	AddGeometryToVBO(&model);
 }
 
 void CModelLoader::DrainPreloadFutures(uint32_t numAllowed)
@@ -433,32 +405,20 @@ void CModelLoader::ParseModel(S3DModel& model, const std::string& name, const st
 
 
 
-void CModelLoader::PostProcessGeometry(S3DModel* model)
+void CModelLoader::AddGeometryToVBO(S3DModel* model)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	assert(model);
+
 	if (model->loadStatus == S3DModel::LoadStatus::LOADED)
 		return;
 
-	// does quads and strips conversion sometimes. Need to run first
-	for (size_t i = 0; i < model->pieceObjects.size(); ++i) {
-		auto* p = model->pieceObjects[i];
-
-		// Calculate tangents for pieces with geometry
-		if (p->HasGeometryData()) {
-		auto& verts = p->tmpVerts;
-		auto& indcs = p->tmpIndcs;
-			if (!verts.empty() && !indcs.empty()) {
-				ModelUtils::CalculateTangents(verts, indcs);
-			}
-		}
-
-		p->CreateShatterPieces();
-	}
 	{
 		auto lock = CModelsLock::GetScopedLock(); // working with S3DModelVAO needs locking
 		auto& inst = S3DModelVAO::GetInstance();
-		inst.ProcessVertices(model);
-		inst.ProcessIndicies(model);
+
+		assert(model->loadStatus == S3DModel::LoadStatus::LOADING);
+		inst.AddModelGeometry(model);
 		model->loadStatus = S3DModel::LoadStatus::LOADED;
 	}
 	cv.notify_all();
@@ -481,15 +441,6 @@ void CModelLoader::Upload(S3DModel* model) const {
 			textureHandlerS3O.LoadTexture(model);
 		}
 	}
-
-	for (auto* p : model->pieceObjects) {
-		p->ReleaseShatterIndices();
-	}
-
-	// warn about models with bad normals (they break lighting)
-	// skip for 3DO's since those have auto-calculated normals
-	if (model->type != MODELTYPE_3DO)
-		CheckPieceNormals(model, model->GetRootPiece());
 
 	model->uploaded = true;
 }

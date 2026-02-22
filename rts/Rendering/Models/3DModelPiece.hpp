@@ -27,7 +27,7 @@ struct S3DModelPiece {
 
 		tmpVerts.clear();
 		tmpIndcs.clear();
-		shatterIndices.clear();
+		tmpShIndcs.clear();
 
 		parent = nullptr;
 		colvol = {};
@@ -43,14 +43,12 @@ struct S3DModelPiece {
 
 		aabb.Reset();
 
-		vertIndex = ~0u;
-		indxStart = ~0u;
-		indxCount = ~0u;
-
 		relVertOff = ~0u;
 		relVertCnt = 0;
 		relIndxOff = ~0u;
 		relIndxCnt = 0;
+		relShIndxOff = ~0u;
+		relShIndxCnt = 0;
 	}
 
 	void SetEmitters();
@@ -65,7 +63,7 @@ public:
 	void DrawStaticLegacyRec() const;
 
 	void CreateShatterPieces();
-	void Shatter(float, int, int, int, const float3, const float3, const CMatrix44f&) const;
+	void Shatter(float pieceChance, int modelType, int texType, int team, const float3 pos, const float3 speed, const CMatrix44f& m) const;
 
 	void SetPieceTransform(const Transform& parentTra);
 	void SetBakedTransform(const Transform& tra) {
@@ -79,13 +77,10 @@ public:
 
 	void SetCollisionVolume(const CollisionVolume& cv) { colvol = cv; }
 	const CollisionVolume* GetCollisionVolume() const { return &colvol; }
-	      CollisionVolume* GetCollisionVolume()       { return &colvol; }
 
-	bool HasGeometryData() const { return tmpIndcs.size() >= 3; }
+	bool HasGeometryData() const { return relIndxCnt >= 3; }
 	void SetParentModel(S3DModel* model_) { model = model_; }
 	const S3DModel* GetParentModel() const { return model; }
-
-	void ReleaseShatterIndices();
 
 	bool HasBackedTra() const { return bakedTransform.has_value(); }
 
@@ -93,13 +88,13 @@ public:
 private:
 	void CreateShatterPiecesVariation(int num);
 	void DrawStaticLegacyRecImpl(const float3& rootT) const;
+	CollisionVolume colvol;
 public:
 	std::string name;
 	std::vector<S3DModelPiece*> children;
 	std::array<S3DModelPiecePart, S3DModelPiecePart::SHATTER_VARIATIONS> shatterParts;
 
 	S3DModelPiece* parent = nullptr;
-	CollisionVolume colvol;
 
 	// bind-pose transform, including baked rots
 	Transform bposeTransform;
@@ -116,20 +111,19 @@ public:
 
 	AABB aabb;
 
-	uint32_t vertIndex = ~0u; // global vertex number offset
-	uint32_t indxStart = ~0u; // global Index VBO offset
-	uint32_t indxCount = ~0u;
-
-	// Relative offset/count within model.skinnedMesh (set for pieces with geometry)
+	// Relative offset/count within model's VBO allocation
+	// Absolute index offset = model.indxStart + piece.relIndxOff
 	uint32_t relVertOff = ~0u;
 	uint32_t relVertCnt = 0;
 	uint32_t relIndxOff = ~0u;
 	uint32_t relIndxCnt = 0;
+	uint32_t relShIndxOff = ~0u;
+	uint32_t relShIndxCnt = 0;
 
 	// Temporary vertex and index data, cleared after upload to GPU
 	std::vector<SVertexData> tmpVerts;
 	std::vector<uint32_t> tmpIndcs;
-	std::vector<uint32_t> shatterIndices;
+	std::vector<uint32_t> tmpShIndcs;
 
 	S3DModel* model = nullptr;
 };

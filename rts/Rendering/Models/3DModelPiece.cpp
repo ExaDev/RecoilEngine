@@ -1,5 +1,6 @@
 #include "3DModelPiece.hpp"
 
+#include "3DModel.hpp"
 #include "3DModelVAO.hpp"
 #include "Sim/Projectiles/ProjectileHandler.h"
 #include "Game/GlobalUnsynced.h"
@@ -59,11 +60,7 @@ void S3DModelPiece::DrawStaticLegacyRec() const
 void S3DModelPiece::CreateShatterPieces()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (!HasGeometryData())
-		return;
-
-	shatterIndices.reserve(S3DModelPiecePart::SHATTER_VARIATIONS * tmpIndcs.size());
-
+	tmpShIndcs.reserve(S3DModelPiecePart::SHATTER_VARIATIONS * tmpIndcs.size());
 	for (int i = 0; i < S3DModelPiecePart::SHATTER_VARIATIONS; ++i) {
 		CreateShatterPiecesVariation(i);
 	}
@@ -123,7 +120,7 @@ void S3DModelPiece::CreateShatterPiecesVariation(int num)
 
 		assert(mcp);
 
-		//  + vertIndex will be added in void S3DModelVAO::ProcessIndicies(S3DModel* model)
+		//  + vertex offset + piece->relVertOff will be added in S3DModelVAO::ProcessIndicies()
 		(mcp->second).push_back(tmpIndcs[i + 0]);
 		(mcp->second).push_back(tmpIndcs[i + 1]);
 		(mcp->second).push_back(tmpIndcs[i + 2]);
@@ -139,7 +136,7 @@ void S3DModelPiece::CreateShatterPiecesVariation(int num)
 			rd.indexStart = static_cast<uint32_t>(num * mapSize) + indxPos;
 
 			if (rd.indexCount > 0) {
-				shatterIndices.insert(shatterIndices.end(), idcs.begin(), idcs.end());
+				tmpShIndcs.insert(tmpShIndcs.end(), idcs.begin(), idcs.end());
 				indxPos += rd.indexCount;
 			}
 		}
@@ -226,11 +223,13 @@ void S3DModelPiece::SetEmitters()
 void S3DModelPiece::DrawElements(GLuint prim) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (indxCount == 0)
+	if (relIndxCnt == 0)
 		return;
-	assert(indxCount != ~0u);
+	assert(relIndxCnt != ~0u);
+	assert(model != nullptr);
 
-	S3DModelVAO::GetInstance().DrawElements(prim, indxStart, indxCount);
+	// Use model's global VBO offset + piece's relative offset
+	S3DModelVAO::GetInstance().DrawElements(prim, model->indxStart + relIndxOff, relIndxCnt);
 }
 
 void S3DModelPiece::DrawShatterElements(uint32_t vboIndxStart, uint32_t vboIndxCount, GLuint prim)
@@ -240,10 +239,4 @@ void S3DModelPiece::DrawShatterElements(uint32_t vboIndxStart, uint32_t vboIndxC
 		return;
 
 	S3DModelVAO::GetInstance().DrawElements(prim, vboIndxStart, vboIndxCount);
-}
-
-void S3DModelPiece::ReleaseShatterIndices()
-{
-	RECOIL_DETAILED_TRACY_ZONE;
-	shatterIndices.clear();
 }

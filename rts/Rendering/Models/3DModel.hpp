@@ -21,7 +21,7 @@ struct S3DModelPiece;
  */
 struct S3DModel
 {
-	enum LoadStatus {
+	enum class LoadStatus {
 		NOTLOADED,
 		LOADING,
 		LOADED
@@ -41,7 +41,7 @@ struct S3DModel
 
 		, relMidPos(ZeroVector)
 
-		, loadStatus(NOTLOADED)
+		, loadStatus(LoadStatus::NOTLOADED)
 		, uploaded(false)
 
 		, traAlloc(ScopedTransformMemAlloc())
@@ -92,8 +92,8 @@ public:
 	int numPieces;
 	int textureType;            /// FIXME: MAKE S3O ONLY (0 = 3DO, otherwise S3O or ASSIMP)
 
-	uint32_t indxStart; //global VBO offset, size data
-	uint32_t indxCount;
+	uint32_t indxStart; //global VBO offset
+	uint32_t indxCount; //global VBO count
 
 	ModelType type;
 
@@ -107,7 +107,9 @@ public:
 	bool uploaded;
 
 	// Skinned mesh data (for models with bone-based skinning)
-	Skinning::SkinnedMesh skinnedMesh;
+	std::vector<SVertexData> skinnedVerts;
+	std::vector<uint32_t> skinnedIndcs;
+	std::vector<uint32_t> shIndcs;
 	// needs to be stored so it can be processed after the model is loaded
 	ModelUtils::ModelParams modelParams;
 private:

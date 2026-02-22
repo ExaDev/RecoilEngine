@@ -66,56 +66,101 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 	// Reserve space
 	{
 		const auto totalVerts = std::ranges::fold_left(
-			model->pieceObjects, model->skinnedMesh.verts.size(),
+			model->pieceObjects, model->skinnedVerts.size(),
 			[](auto acc, auto* piece) {
 				return acc + piece->tmpVerts.size();
 			}
 		);
 		const auto totalIndcs = std::ranges::fold_left(
-			model->pieceObjects, model->skinnedMesh.indcs.size(),
+			model->pieceObjects, model->skinnedIndcs.size(),
 			[](auto acc, auto* piece) {
 				return acc + piece->tmpIndcs.size();
 			}
 		);
 
-		model->skinnedMesh.verts.reserve(totalVerts);
-		model->skinnedMesh.indcs.reserve(totalIndcs);
+		const auto totalShIndcs = std::ranges::fold_left(
+			model->pieceObjects, model->shIndcs.size(),
+			[](auto acc, auto* piece) {
+				return acc + piece->tmpShIndcs.size();
+			}
+		);
+
+		model->skinnedVerts.reserve(totalVerts);
+		model->skinnedIndcs.reserve(totalIndcs);
+		model->shIndcs.reserve(totalShIndcs);
 	}
 
 	for (size_t pieceIdx = 0; pieceIdx < model->pieceObjects.size(); ++pieceIdx) {
 		auto* piece = model->pieceObjects[pieceIdx];
-		piece->SetEmitters();
-
-		if (!piece->HasGeometryData())
-			continue;
 
 		auto& pieceVerts = piece->tmpVerts;
 		auto& pieceIndcs = piece->tmpIndcs;
 
-		// Record relative offset and count for this piece in skinnedMesh
-		piece->relVertOff = static_cast<uint32_t>(model->skinnedMesh.verts.size());
+		// Record relative offset and count for this piece in skinnedVerts/skinnedIndcs
+		piece->relVertOff = static_cast<uint32_t>(model->skinnedVerts.size());
 		piece->relVertCnt = static_cast<uint32_t>(pieceVerts.size());
-		piece->relIndxOff = static_cast<uint32_t>(model->skinnedMesh.indcs.size());
+		piece->relIndxOff = static_cast<uint32_t>(model->skinnedIndcs.size());
 		piece->relIndxCnt = static_cast<uint32_t>(pieceIndcs.size());
+		piece->relShIndxOff = static_cast<uint32_t>(model->shIndcs.size());
+		// relShIndxCnt will be set after CreateShatterPieces()
+
+		piece->SetEmitters();
+		if (!piece->HasGeometryData())
+			continue;
+
+		// Create shatter pieces first - this populates piece->tmpShIndcs
+		piece->CreateShatterPieces();
+
+		// Now record shatter index count after CreateShatterPieces() populated tmpShIndcs
+		auto& pieceShIndcs = piece->tmpShIndcs;
+		piece->relShIndxCnt = static_cast<uint32_t>(pieceShIndcs.size());
 
 		// Transform verts
 		for (const auto& vert : pieceVerts) {
-			auto& transformedVertex = model->skinnedMesh.verts.emplace_back(vert.TransformBy(piece->bposeTransform));
-			assert(transformedVertex.boneIDs == SVertexData::DEFAULT_BONEIDS);
-			assert(transformedVertex.boneWeights == SVertexData::DEFAULT_BONEWEIGHTS);
-
-			// Assign pieceIndex to first bone ID
-			transformedVertex.boneIDs[0] = static_cast<uint16_t>(pieceIdx);
+			auto& transformedVertex = model->skinnedVerts.emplace_back(vert.TransformBy(piece->bposeTransform));
+			if (transformedVertex.boneIDs == SVertexData::DEFAULT_BONEIDS) {
+				assert(transformedVertex.boneWeights == SVertexData::DEFAULT_BONEWEIGHTS);
+				// Assign pieceIndex to first bone ID
+				transformedVertex.boneIDs[0] = static_cast<uint16_t>(pieceIdx);
+			}
 		}
 
 		// Copy and adjust indices
 		for (auto idx : pieceIndcs) {
-			model->skinnedMesh.indcs.emplace_back(static_cast<uint32_t>(piece->relVertOff + idx));
+			model->skinnedIndcs.emplace_back(static_cast<uint32_t>(piece->relVertOff + idx));
+		}
+
+		// Copy and adjust shatter indices
+		for (auto idx : pieceShIndcs) {
+			model->shIndcs.emplace_back(static_cast<uint32_t>(piece->relVertOff + idx));
 		}
 
 		// makes no sense to keep them?
 		pieceVerts.clear();
 		pieceIndcs.clear();
+		pieceShIndcs.clear();
+	}
+}
+
+void ModelUtils::CheckNormalAndTangent(const S3DModel* model)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+
+	const auto& verts = model->skinnedVerts;
+
+	uint32_t numBadNormals = 0;
+	uint32_t numBadTangents = 0;
+
+	static constexpr float sqThreshold = Square(0.9f);
+
+	for (const auto& vert : verts) {
+		numBadNormals  += (vert.normal.SqLength()  < sqThreshold);
+		numBadTangents += (vert.tangent.SqLength() < sqThreshold);
+	}
+
+	if (numBadNormals > 0 || numBadTangents > 0) {
+		LOG_L(L_DEBUG, "[%s] model \"%s\" has %u vertices, %u with invalid normals, %u with invalid tangents",
+			__func__, model->name.c_str(), static_cast<uint32_t>(verts.size()), numBadNormals, numBadTangents);
 	}
 }
 
@@ -124,16 +169,15 @@ void ModelUtils::CalculateNormals(std::vector<SVertexData>& verts, const std::ve
 	if (indcs.size() < 3)
 		return;
 
-	// set the triangle-level S- and T-tangents
 	for (size_t i = 0, n = indcs.size(); i < n; i += 3) {
 
 		const auto& v0idx = indcs[i + 0];
 		const auto& v1idx = indcs[i + 1];
 		const auto& v2idx = indcs[i + 2];
 
-		if (v1idx == INVALID_INDEX || v2idx == INVALID_INDEX) {
+		if (v0idx == INVALID_INDEX || v1idx == INVALID_INDEX || v2idx == INVALID_INDEX) {
 			// not a valid triangle, skip
-			i += 3; continue;
+			continue;
 		}
 
 		auto& v0 = verts[v0idx];

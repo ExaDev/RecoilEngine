@@ -483,7 +483,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 	// except this one doesn't ignore nodes with skinned meshes
 	const auto modelTransforms = Impl::GetModelTransforms(asset, defaultSceneIdx, initTransform);
 
-	// Collect skinned mesh data directly into model.skinnedMesh
+	// Collect skinned mesh data directly into model.skinnedVerts/skinnedIndcs
 	for (size_t ni = 0; ni < asset.nodes.size(); ++ni) {
 		const auto& node = asset.nodes[ni];
 		if (!node.meshIndex.has_value())
@@ -496,14 +496,14 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 		const auto& mesh = asset.meshes[*node.meshIndex];
 
 		// Append vertices and indices to model's skinned mesh
-		const auto vertOffset = model.skinnedMesh.verts.size();
-		Impl::ReadGeometryData(asset, mesh.primitives, model.skinnedMesh.verts, model.skinnedMesh.indcs, ni, &skin);
-		Impl::TransformSkinsToModelSpace(model.skinnedMesh.verts, ni, modelTransforms);
-		Impl::ReplaceNodeIndexWithPieceIndex(model.skinnedMesh.verts, nodeIdxToPieceIdx);
+		const auto vertOffset = model.skinnedVerts.size();
+		Impl::ReadGeometryData(asset, mesh.primitives, model.skinnedVerts, model.skinnedIndcs, ni, &skin);
+		Impl::TransformSkinsToModelSpace(model.skinnedVerts, ni, modelTransforms);
+		Impl::ReplaceNodeIndexWithPieceIndex(model.skinnedVerts, nodeIdxToPieceIdx);
 
 		// Adjust indices for the appended vertices
-		for (size_t i = vertOffset; i < model.skinnedMesh.indcs.size(); ++i) {
-			model.skinnedMesh.indcs[i] += vertOffset;
+		for (size_t i = vertOffset; i < model.skinnedIndcs.size(); ++i) {
+			model.skinnedIndcs[i] += vertOffset;
 		}
 	}
 

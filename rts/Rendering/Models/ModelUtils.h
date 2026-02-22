@@ -10,13 +10,6 @@ class LuaTable;
 struct S3DModel;
 struct S3DModelPiece;
 
-namespace Skinning {
-	struct SkinnedMesh {
-		std::vector<SVertexData> verts;
-		std::vector<uint32_t> indcs;
-	};
-};
-
 namespace ModelUtils {
 	struct ModelParams {
 		std::array<std::optional<std::string>, 2> texs;
@@ -42,8 +35,11 @@ namespace ModelUtils {
 	// Calculate missing tangents
 	void CalculateTangents(std::vector<SVertexData>& verts, const std::vector<uint32_t>& indcs);
 
-	// Transfer all piece vertices/indices to model's skinnedMesh, transforming vertices to model space
+	// Transfer all piece vertices/indices to model's skinnedVerts/skinnedIndcs, transforming vertices to model space
 	void TransferPiecesToSkinnedMesh(S3DModel* model);
+
+	// Check for invalid normals and tangents in skinnedVerts
+	void CheckNormalAndTangent(const S3DModel* model);
 
 	static constexpr uint32_t INVALID_INDEX = uint32_t(-1);
 }

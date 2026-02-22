@@ -40,7 +40,9 @@ S3DModel& S3DModel::operator= (S3DModel&& m) noexcept {
 	loadStatus = m.loadStatus;
 	uploaded = m.uploaded;
 
-	skinnedMesh = std::move(m.skinnedMesh);
+	skinnedVerts = std::move(m.skinnedVerts);
+	skinnedIndcs = std::move(m.skinnedIndcs);
+	shIndcs = std::move(m.shIndcs);
 	modelParams = std::move(m.modelParams);
 
 	std::swap(traAlloc, m.traAlloc);
@@ -150,7 +152,7 @@ void S3DModel::FinalizeLoad()
 	}
 
 	aabb.Reset();
-	for (const auto& vert : skinnedMesh.verts) {
+	for (const auto& vert : skinnedVerts) {
 		aabb.AddPoint(vert.pos);
 
 		const uint16_t pieceIdx = vert.boneIDs[0];
