@@ -959,7 +959,7 @@ void CUnitScript::Shatter(int piece, const float3& pos, const float3& speed)
 
 	const float pieceChance = 1.0f - (projectileHandler.GetCurrentParticles() - (projectileHandler.maxParticles - 2000)) / 2000.0f;
 	if (pieceChance > 0.0f) {
-		const CMatrix44f m = unit->GetTransformMatrix() * lmp->GetModelSpaceMatrix();
+		const CMatrix44f m = unit->GetTransformMatrix() * lmp->GetDeltaTransformMatrix();
 		omp->Shatter(pieceChance, unit->model->type, unit->model->textureType, unit->team, pos, speed, m);
 	}
 }
