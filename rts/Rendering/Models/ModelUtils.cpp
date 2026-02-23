@@ -9,6 +9,7 @@
 #include "3DModelDefs.hpp"
 #include "3DModel.hpp"
 #include "3DModelPiece.hpp"
+#include "System/ContainerUtil.h"
 #include "System/Misc/TracyDefs.h"
 #include "Lua/LuaParser.h"
 
@@ -117,12 +118,12 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 		}
 
 		// Copy and adjust indices
-		model->skinnedIndcs.append_range(
+		spring::AppendRange(model->skinnedIndcs,
 			pieceIndcs | std::views::transform([baseVertNum = piece->relVertOff](auto v) { return baseVertNum + v; }) // add baseVertNum to indices
 		);
 
 		// Copy and adjust shatter indices
-		model->shatterIndcs.append_range(
+		spring::AppendRange(model->shatterIndcs,
 			pieceShIndcs | std::views::transform([baseVertNum = piece->relVertOff](auto v) { return baseVertNum + v; }) // add baseVertNum to indices
 		);
 

@@ -15,6 +15,7 @@
 #include "Sim/Features/Feature.h"
 
 #include "System/Misc/TracyDefs.h"
+#include "System/ContainerUtil.h"
 
 
 void S3DModelVAO::EnableAttribs(bool inst) const
@@ -80,17 +81,17 @@ void S3DModelVAO::AddModelGeometry(S3DModel* model)
 	auto& skinnedIndcs = model->skinnedIndcs;
 	auto& shatterIndcs = model->shatterIndcs;
 
-	vertData.append_range(skinnedVerts);
+	spring::AppendRange(vertData, skinnedVerts);
 
 	model->indxStart = static_cast<uint32_t>(indxData.size());
 	model->indxCount = static_cast<uint32_t>(skinnedIndcs.size());
 
-	indxData.append_range(
+	spring::AppendRange(indxData,
 		skinnedIndcs | std::views::transform([baseVertNum](auto v) { return baseVertNum + v; }) // add baseVertNum to indices
 	);
 
 	// Add shatter indices to the end of indxData
-	indxData.append_range(
+	spring::AppendRange(indxData,
 		shatterIndcs | std::views::transform([baseVertNum](auto v) { return baseVertNum + v; })
 	);
 
