@@ -1,10 +1,13 @@
 #include "3DModelPiece.hpp"
 
+#include <ranges>
+
 #include "3DModel.hpp"
 #include "3DModelVAO.hpp"
 #include "Sim/Projectiles/ProjectileHandler.h"
 #include "Game/GlobalUnsynced.h"
 #include "System/Misc/TracyDefs.h"
+#include "System/Threading/ThreadPool.h"
 
 /** ****************************************************************************************************
  * S3DModelPiece
@@ -55,6 +58,9 @@ void S3DModelPiece::DrawStaticLegacyRec() const
 void S3DModelPiece::CreateShatterPieces()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
+	if (tmpIndcs.size() < 3 || tmpIndcs.size() % 3 != 0)
+		return;
+
 	tmpShIndcs.reserve(S3DModelPiecePart::SHATTER_VARIATIONS * tmpIndcs.size());
 	for (int i = 0; i < S3DModelPiecePart::SHATTER_VARIATIONS; ++i) {
 		CreateShatterPiecesVariation(i);
@@ -78,49 +84,58 @@ void S3DModelPiece::CreateShatterPiecesVariation(int num)
 
 	ShatterPartsBuffer shatterPartsBuf;
 
+	auto& gutRNG = guThreadRNGs[ThreadPool::GetThreadNum()];
+	// Assign a random "fly direction" to each shatter part
 	for (auto& [rd, idcs] : shatterPartsBuf) {
-		rd.dir = (guRNG.NextVector()).ANormalize();
+		rd.dir = (gutRNG.NextVector()).ANormalize();
 	}
 
-	// helper
-	const auto GetPolygonDir = [&](size_t idx)
-	{
-		float3 midPos;
-		midPos += tmpVerts[tmpIndcs[idx + 0]].pos;
-		midPos += tmpVerts[tmpIndcs[idx + 1]].pos;
-		midPos += tmpVerts[tmpIndcs[idx + 2]].pos;
-		midPos /= 3.0f;
-		return midPos.ANormalize();
+	const auto GetPolygonDir = [&](uint32_t i0, uint32_t i1, uint32_t i2) -> float3 {
+		const auto& v0 = tmpVerts[i0];
+		const auto& v1 = tmpVerts[i1];
+		const auto& v2 = tmpVerts[i2];
+
+		float3 N;
+		N += v0.normal;
+		N += v1.normal;
+		N += v2.normal;
+
+		if likely(const auto SqL = N.SqLength(); SqL >= float3::apx_eps())
+			return N *= math::isqrt(SqL);
+
+		const auto p10 = v1.pos - v0.pos;
+		const auto p20 = v2.pos - v0.pos;
+
+		// not normalized so bigger triangles have more influence on shatter part assignment
+		return p10.cross(p20);
 	};
 
-	// add vertices to splitter parts
-	for (size_t i = 0; i < tmpIndcs.size(); i += 3) {
-		const float3& dir = GetPolygonDir(i);
+	namespace rv = std::ranges::views;
 
-		// find the closest shatter part (the one that points into same dir)
-		float md = -2.0f;
+	// We iterate over every triangle (3 consecutive indices = 1 triangle).
+	// For each triangle, we find the shatter part whose random direction is
+	// most aligned with the triangle's facing direction (highest dot product).
+	// This ensures triangles on the "left side" of a model go to a left-flying
+	// fragment, right-side triangles to a right-flying fragment, etc.
+	for (auto&& chunk : tmpIndcs | rv::chunk(3)) {
+		// actually transform it into the model space, so different pieces experience consistent shattering
+		const auto dir = bposeTransform * GetPolygonDir(chunk[0], chunk[1], chunk[2]);
 
-		ShatterPartDataPair* mcp = nullptr;
-		const S3DModelPiecePart::RenderData* rd = nullptr;
+		const auto best = std::ranges::max_element(
+			shatterPartsBuf,
+			std::less{},
+			[&dir](const ShatterPartDataPair& cp) {
+				return cp.first.dir.dot(dir);
+			}
+		);
 
-		for (ShatterPartDataPair& cp: shatterPartsBuf) {
-			rd = &cp.first;
-
-			if (rd->dir.dot(dir) < md)
-				continue;
-
-			md = rd->dir.dot(dir);
-			mcp = &cp;
-		}
-
-		assert(mcp);
-
-		//  + vertex offset + piece->relVertOff will be added in S3DModelVAO::ProcessIndicies()
-		(mcp->second).push_back(tmpIndcs[i + 0]);
-		(mcp->second).push_back(tmpIndcs[i + 1]);
-		(mcp->second).push_back(tmpIndcs[i + 2]);
+		assert(best != shatterPartsBuf.end());
+		std::ranges::copy(chunk, std::back_inserter(best->second));
 	}
 
+	// Now that triangles are distributed, we calculate where each part's indices
+	// live in tmpShIndcs
+	// The offset `num * mapSize` ensures different variations don't overlap.
 	{
 		const size_t mapSize = tmpIndcs.size();
 
@@ -129,36 +144,25 @@ void S3DModelPiece::CreateShatterPiecesVariation(int num)
 		for (auto& [rd, idcs] : shatterPartsBuf) {
 			rd.indexCount = static_cast<uint32_t>(idcs.size());
 			rd.indexStart = static_cast<uint32_t>(num * mapSize) + indxPos;
-
-			if (rd.indexCount > 0) {
-				tmpShIndcs.insert(tmpShIndcs.end(), idcs.begin(), idcs.end());
-				indxPos += rd.indexCount;
-			}
+			tmpShIndcs.insert(tmpShIndcs.end(), idcs.begin(), idcs.end());
+			indxPos += rd.indexCount;
 		}
 	}
 
-	{
-		// delete empty splitter parts
-		size_t backIdx = shatterPartsBuf.size() - 1;
+	// partition() moves all non-empty parts to the front and returns a subrange
+	const auto emptyBegin = std::ranges::partition(
+		shatterPartsBuf,
+		[](const ShatterPartDataPair& p) { return p.first.indexCount > 0; }
+	);
+	const auto validRange = std::ranges::subrange(shatterPartsBuf.begin(), emptyBegin.begin());
 
-		for (size_t j = 0; j < shatterPartsBuf.size() && j < backIdx; ) {
-			const auto& [rd, idcs] = shatterPartsBuf[j];
+	// Copy the render metadata (direction, index range) of all non-empty parts
+	// into shatterParts[num], which is what the renderer will actually use.
+	shatterParts[num].renderData.clear();
+	shatterParts[num].renderData.reserve(validRange.size());
 
-			if (rd.indexCount == 0) {
-				std::swap(shatterPartsBuf[j], shatterPartsBuf[backIdx--]);
-				continue;
-			}
-
-			j++;
-		}
-
-		shatterParts[num].renderData.clear();
-		shatterParts[num].renderData.reserve(backIdx + 1);
-
-		// finish: copy buffer to actual memory
-		for (size_t n = 0; n <= backIdx; n++) {
-			shatterParts[num].renderData.push_back(shatterPartsBuf[n].first);
-		}
+	for (const auto& [rd, idcs] : validRange) {
+		shatterParts[num].renderData.push_back(rd);
 	}
 }
 
@@ -166,7 +170,7 @@ void S3DModelPiece::CreateShatterPiecesVariation(int num)
 void S3DModelPiece::Shatter(float pieceChance, int modelType, int texType, int team, const float3 pos, const float3 speed, const CMatrix44f& m) const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	const float2  pieceParams = {float3::max(float3::fabs(aabb.maxs), float3::fabs(aabb.mins)).Length(), pieceChance};
+	const float2  pieceParams = { aabb.CalcRadius(), pieceChance };
 	const   int2 renderParams = {texType, team};
 
 	projectileHandler.AddFlyingPiece(modelType, this, m, pos, speed, pieceParams, renderParams);

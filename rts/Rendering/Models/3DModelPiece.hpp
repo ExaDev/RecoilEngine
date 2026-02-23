@@ -48,7 +48,6 @@ struct S3DModelPiece {
 		relVertCnt = 0;
 		relIndxOff = ~0u;
 		relIndxCnt = 0;
-		relShIndxOff = ~0u;
 	}
 
 	void SetEmitters();
@@ -119,7 +118,6 @@ public:
 	uint32_t relVertCnt = 0;
 	uint32_t relIndxOff = ~0u;
 	uint32_t relIndxCnt = 0;
-	uint32_t relShIndxOff = ~0u;
 
 	// Temporary vertex and index data, cleared after upload to GPU
 	std::vector<SVertexData> tmpVerts;

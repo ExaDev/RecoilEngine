@@ -10,7 +10,6 @@ public:
 		float3 dir;
 		uint32_t indexStart;
 		uint32_t indexCount;
-		uint32_t indexOffset = 0;
 	};
 
 	static const int SHATTER_MAX_PARTS  = 10;

@@ -103,7 +103,6 @@ void ModelUtils::TransferPiecesToSkinnedMesh(S3DModel* model)
 		// Record relative offset for this piece in skinnedVerts/skinnedIndcs/shatterIndcs
 		piece->relVertOff = static_cast<uint32_t>(model->skinnedVerts.size());
 		piece->relIndxOff = static_cast<uint32_t>(model->skinnedIndcs.size());
-		piece->relShIndxOff = static_cast<uint32_t>(model->shatterIndcs.size());
 
 		auto& pieceShIndcs = piece->tmpShIndcs;
 
@@ -183,6 +182,7 @@ void ModelUtils::CalculateNormals(std::vector<SVertexData>& verts, const std::ve
 		const auto p10 = p1 - p0;
 		const auto p20 = p2 - p0;
 
+		//not normalized on purpose, so a bigger triangle contributes more to the normal than a smaller one
 		const auto N = p10.cross(p20);
 
 		v0.normal += N;

@@ -45,16 +45,16 @@ FlyingPiece::FlyingPiece(
 
 	splitterParts.reserve(shatterPieceData.size());
 	for (const auto& cp: shatterPieceData) {
-		if (guRNG.NextFloat() > _pieceParams.x)
+		if (guRNG.NextFloat() > _pieceParams.y)
 			continue;
 
 		const float3 flyDir = (cp.dir + (guRNG.NextVector() * 0.3f)).ANormalize();
 
-		splitterParts.emplace_back();
-		splitterParts.back().speed                = speed + flyDir * mix<float>(1.f, EXPLOSION_SPEED, guRNG.NextFloat());
-		splitterParts.back().rotationAxisAndSpeed = float4(guRNG.NextVector().ANormalize(), guRNG.NextFloat() * 0.1f);
-		splitterParts.back().indexCount = cp.indexCount;
-		splitterParts.back().indexStart	= cp.indexStart;
+		auto& sp = splitterParts.emplace_back();
+		sp.speed                = speed + flyDir * mix<float>(1.f, EXPLOSION_SPEED, guRNG.NextFloat());
+		sp.rotationAxisAndSpeed = float4(guRNG.NextVector().ANormalize(), guRNG.NextFloat() * 0.1f);
+		sp.indexCount = cp.indexCount;
+		sp.indexStart = cp.indexStart;
 	}
 }
 
@@ -247,8 +247,6 @@ void FlyingPiece::Draw(const FlyingPiece* prev) const
 		//   (shatter indices are always times S3DModelPiecePart::SHATTER_VARIATIONS, compared to normal indices)
 		const uint32_t baseOffset =
 			model->indxStart + model->indxCount + piece->relIndxOff * S3DModelPiecePart::SHATTER_VARIATIONS;
-
-		//piece->relShIndxOff
 
 		S3DModelPiece::DrawShatterElements(baseOffset + cp.indexStart, cp.indexCount);
 		glPopMatrix();
