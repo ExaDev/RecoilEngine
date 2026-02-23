@@ -403,22 +403,10 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 				file << "\t\t\toffset: " << TapFloats(p->offset);
 				file << "\t\t\tgoffset: " << TapFloats(p->goffset);
 				file << "\t\t\tscales: " << TapFloats(p->scale);
-				file << "\t\t\tscales: " << TapFloats(p->aabb.mins);
-				file << "\t\t\tscales: " << TapFloats(p->aabb.maxs);
-
-			// tmpVerts and tmpIndcs are now empty after upload to GPU is complete
-#if 0
-			file << "\t\t\tvertices.size(): " << p->tmpVerts.size() << "\n";
-			for (const auto& v : p->tmpVerts) { //is it sync significant?
-				file << "\t\t\tpos: " << TapFloats(v.pos);
-			}
-
-			file << "\t\t\tindices.size(): " << p->tmpIndcs.size() << "\n";
-			file << "\t\t\t";
-			for (const auto& i : p->tmpIndcs) { //is it sync significant?
-				file << i << ", ";
-			}
-#endif
+				file << "\t\t\tmins: " << TapFloats(p->aabb.mins);
+				file << "\t\t\tmaxs: " << TapFloats(p->aabb.maxs);
+				file << "\t\t\tvertCount: " << p->relVertCnt << "\n";
+				file << "\t\t\tindxCount: " << p->relIndxCnt << "\n";
 				file << "\n";
 			}
 			file << "\n";
