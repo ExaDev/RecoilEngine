@@ -943,7 +943,6 @@ void CUnitScript::Explode(int piece, int flags)
 	newFlags |= (PF_Smoke      * (((flags & PF_Smoke     ) != 0) && partSat < 0.95f));
 	newFlags |= (PF_Fire       * (((flags & PF_Fire      ) != 0) && partSat < 0.95f));
 	newFlags |= (PF_NoCEGTrail *  ((flags & PF_NoCEGTrail) != 0)                    );
-	newFlags |= (PF_Recursive  *  ((flags & PF_Recursive ) != 0)                    );
 
 	projMemPool.alloc<CPieceProjectile>(unit, pieces[piece], absPos, explSpeed + baseSpeed, newFlags, 0.5f);
 #endif

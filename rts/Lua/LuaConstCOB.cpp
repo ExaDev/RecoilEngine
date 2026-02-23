@@ -208,7 +208,6 @@ bool LuaConstSFX::PushEntries(lua_State* L)
 	 * @field SFX.NONE integer
 	 * @field SFX.NO_CEG_TRAIL integer
 	 * @field SFX.NO_HEATCLOUD integer
-	 * @field SFX.RECURSIVE integer
 	 */
 	LuaPushNamedNumber(L, "SHATTER", PF_Shatter);
 	LuaPushNamedNumber(L, "EXPLODE", PF_Explode);
@@ -219,7 +218,6 @@ bool LuaConstSFX::PushEntries(lua_State* L)
 	LuaPushNamedNumber(L, "NONE",  PF_NONE); // BITMAP_ONLY
 	LuaPushNamedNumber(L, "NO_CEG_TRAIL", PF_NoCEGTrail);
 	LuaPushNamedNumber(L, "NO_HEATCLOUD", PF_NoHeatCloud);
-	LuaPushNamedNumber(L, "RECURSIVE", PF_Recursive);
 
 	/***
 	 * Piece flag for `Spring.UnitScript.EmitSfx`.

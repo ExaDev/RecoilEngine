@@ -59,7 +59,6 @@ struct S3DModelPiece {
 	static void DrawShatterElements(uint32_t vboIndxStart, uint32_t vboIndxCount, uint32_t prim = 0x0004/*GL_TRIANGLES*/);
 public:
 	void DrawStaticLegacy(bool bind, bool bindPosMat) const;
-	void DrawStaticLegacyRec() const;
 
 	void CreateShatterPieces();
 	void Shatter(float pieceChance, int modelType, int texType, int team, const float3 pos, const float3 speed, const CMatrix44f& m) const;

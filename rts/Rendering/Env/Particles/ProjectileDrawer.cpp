@@ -979,20 +979,7 @@ void CProjectileDrawer::DrawProjectileModel(const CProjectile* p)
 				return;
 			}
 
-			if ((pp->explFlags & PF_Recursive) != 0) {
-				// DrawStaticLegacyRec applies bpose rotation+scale per-piece internally
-				pp->omp->DrawStaticLegacyRec();
-			}
-			else {
-				// Apply the rotation+scale from bposeTransform (but NOT translation, which is the
-				// piece's model-space offset and is irrelevant for a standalone flying piece).
-				{
-					const auto& bpose = pp->omp->bposeTransform;
-					const Transform bposeNoTrans{ bpose.r, ZeroVector, bpose.s };
-					glMultMatrixf(bposeNoTrans.ToMatrix());
-				}
-				pp->omp->DrawStaticLegacy(true, false);
-			}
+			pp->omp->DrawStaticLegacy(true, false);
 
 			return;
 		} break;
