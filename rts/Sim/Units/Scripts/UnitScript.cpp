@@ -251,7 +251,9 @@ void CUnitScript::TickAllAnims(int deltaTime)
 	}
 #else
 	// DFS pass
-	auto WalkDFS = [](this auto&& self, LocalModelPiece* lmp, const Transform& pTra) -> void {
+	// GCC-13 doesn't like recursive lambdas with auto&& self, so we have to declare it separately and capture it by reference
+	//auto WalkDFS = [](this auto&& self, LocalModelPiece* lmp, const Transform& pTra) -> void {
+	auto WalkDFS = [](auto&& self, LocalModelPiece* lmp, const Transform& pTra) -> void {
 		if (lmp->GetDirty()) {
 			lmp->SetDirtyRaw(false);
 			lmp->SetWasUpdatedRaw(true);
@@ -262,10 +264,10 @@ void CUnitScript::TickAllAnims(int deltaTime)
 		const Transform& modelTra = lmp->GetModelSpaceTransformRaw();
 
 		for (auto* p : lmp->children)
-			self(p, modelTra);
+			self(self, p, modelTra);
 	};
 
-	WalkDFS(rootPiece, Transform{});
+	WalkDFS(WalkDFS, rootPiece, Transform{});
 #endif
 #ifdef _DEBUG
 	for (auto* p : pieces) {

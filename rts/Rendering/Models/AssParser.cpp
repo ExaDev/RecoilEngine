@@ -289,7 +289,9 @@ namespace Impl {
 		spring::unordered_map<const aiNode*, Transform> transforms;
 
 		// Recursive lambda to compute transforms
-		auto ComputeTransform = [&](this auto&& self, const aiNode* node, const Transform& parentTransform) -> void {
+		// GCC-13 doesn't like recursive lambdas with auto&& self, so we have to declare it separately and capture it by reference
+		//auto ComputeTransform = [&](this auto&& self, const aiNode* node, const Transform& parentTransform) -> void {
+		auto ComputeTransform = [&](auto&& self, const aiNode* node, const Transform& parentTransform) -> void {
 			aiVector3D aiScaleVec, aiTransVec;
 			aiQuaternion aiRotateQuat;
 			node->mTransformation.Decompose(aiScaleVec, aiRotateQuat, aiTransVec);
@@ -307,11 +309,11 @@ namespace Impl {
 
 			// Recursively process children
 			for (uint32_t i = 0; i < node->mNumChildren; i++) {
-				self(node->mChildren[i], modelSpaceTransform);
+				self(self, node->mChildren[i], modelSpaceTransform);
 			}
 		};
 
-		ComputeTransform(scene->mRootNode, Transform{});
+		ComputeTransform(ComputeTransform, scene->mRootNode, Transform{});
 
 		return transforms;
 	}

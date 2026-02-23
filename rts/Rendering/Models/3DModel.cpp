@@ -164,16 +164,18 @@ void S3DModel::FinalizeLoad()
 		piece->aabb.AddPoint(localPos);
 	}
 
-	auto TraversePieceTree = [](this auto&& self, S3DModelPiece* piece) -> void {
+	// GCC-13 doesn't like recursive lambdas with auto&& self, so we have to declare it separately and capture it by reference
+	//auto TraversePieceTree = [](this auto&& self, S3DModelPiece* piece) -> void {
+	auto TraversePieceTree = [](auto&& self, S3DModelPiece* piece) -> void {
 		if (piece->aabb.IsReset())
 			piece->SetCollisionVolume(CollisionVolume('b', 'z', ZeroVector, ZeroVector));
 		else
 			piece->SetCollisionVolume(CollisionVolume('b', 'z', piece->aabb.CalcFullScales(), piece->aabb.CalcCenter()));
 
 		for (S3DModelPiece* childPiece : piece->children) {
-			self(childPiece);
+			self(self, childPiece);
 		}
 	};
 
-	TraversePieceTree(GetRootPiece());
+	TraversePieceTree(TraversePieceTree, GetRootPiece());
 }
