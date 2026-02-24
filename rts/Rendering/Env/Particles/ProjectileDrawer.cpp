@@ -979,7 +979,13 @@ void CProjectileDrawer::DrawProjectileModel(const CProjectile* p)
 				return;
 			}
 
-			pp->omp->DrawStaticLegacy(true, false);
+			if ((pp->explFlags & PF_Recursive) != 0) {
+				pp->omp->DrawStaticLegacyRec();
+			}
+			else {
+				// non-recursive, only draw one piece
+				pp->omp->DrawStaticLegacy(true, false);
+			}
 
 			return;
 		} break;

@@ -29,6 +29,21 @@ void S3DModelPiece::DrawStaticLegacy(bool bind, bool bindPosMat) const
 	if (bind) S3DModelHelpers::UnbindLegacyAttrVBOs();
 }
 
+// only used by projectiles with the PF_Recursive flag
+void S3DModelPiece::DrawStaticLegacyRec() const
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	S3DModelHelpers::BindLegacyAttrVBOs();
+
+	DrawStaticLegacy(false, false);
+
+	for (const S3DModelPiece* childPiece : children) {
+		childPiece->DrawStaticLegacy(false, false);
+	}
+
+	S3DModelHelpers::UnbindLegacyAttrVBOs();
+}
+
 void S3DModelPiece::CreateShatterPieces()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
