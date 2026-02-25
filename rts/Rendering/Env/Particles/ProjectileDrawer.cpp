@@ -954,13 +954,13 @@ void CProjectileDrawer::DrawProjectileModel(const CProjectile* p)
 
 			CUnitDrawer::SetTeamColor(wp->GetTeamID());
 
-			glPushMatrix();
-				glMultMatrixf(wp->GetTransformMatrix(wp->GetProjectileType() == WEAPON_MISSILE_PROJECTILE));
+			auto scopedPushPop = spring::ScopedNullResource(glPushMatrix, glPopMatrix);
 
-				if (!p->luaDraw || !eventHandler.DrawProjectile(p))
-					wp->model->DrawStatic();
+			glMultMatrixf(wp->GetTransformMatrix(wp->GetProjectileType() == WEAPON_MISSILE_PROJECTILE));
 
-			glPopMatrix();
+			if (!p->luaDraw || !eventHandler.DrawProjectile(p))
+				wp->model->DrawStatic();
+
 			return;
 		} break;
 
@@ -972,8 +972,9 @@ void CProjectileDrawer::DrawProjectileModel(const CProjectile* p)
 
 			auto scopedPushPop = spring::ScopedNullResource(glPushMatrix, glPopMatrix);
 
-			glTranslatef3(pp->drawPos);
-			glRotatef(pp->GetDrawAngle(), pp->spinVec.x, pp->spinVec.y, pp->spinVec.z);
+			Transform pieceTra(CQuaternion::MakeFrom(pp->GetDrawAngle(), pp->spinVec), pp->drawPos);
+			const CMatrix44f deltaMat = (pieceTra * pp->omp->bposeTransformInv).ToMatrix();
+			glMultMatrixf(deltaMat);
 
 			if (p->luaDraw && eventHandler.DrawProjectile(p)) {
 				return;
