@@ -337,23 +337,11 @@ namespace Impl {
 	}
 }
 
-void CGLTFParser::Init()
-{
-	numPoolPieces = 0;
-}
-
 void CGLTFParser::Kill()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	LOG_L(L_INFO, "[CGLTFParser::%s] allocated %u pieces", __func__, numPoolPieces);
-
-	// reuse piece innards when reloading
-	// piecePool.clear();
-	for (uint32_t i = 0; i < numPoolPieces; i++) {
-		piecePool[i].Clear();
-	}
-
-	numPoolPieces = 0;
+	LOG_L(L_INFO, "[CGLTFParser::%s] allocated %u pieces", __func__, static_cast<uint32_t>(pieces.size()));
+	pieces.clear(); pieces.shrink_to_fit();
 }
 
 void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
@@ -523,20 +511,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 GLTFPiece* CGLTFParser::AllocPiece()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	std::lock_guard<spring::mutex> lock(poolMutex);
-
-	// lazily reserve pool here instead of during Init
-	// this way games using only one model-type do not
-	// cause redundant allocation
-	if (piecePool.empty())
-		piecePool.resize(MAX_MODEL_OBJECTS * AVG_MODEL_PIECES);
-
-	if (numPoolPieces >= piecePool.size()) {
-		throw std::bad_alloc();
-		return nullptr;
-	}
-
-	return &piecePool[numPoolPieces++];
+	return static_cast<GLTFPiece*>(AllocPieceImpl());
 }
 
 GLTFPiece* CGLTFParser::AllocRootEmptyPiece(S3DModel* model, const Transform& parentTransform, const fastgltf::Asset& asset, size_t sceneIndex)

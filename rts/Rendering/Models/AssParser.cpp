@@ -481,7 +481,6 @@ void CAssParser::Init()
 	// FIXME: non-optimal, maybe compute these ourselves (pre-TL cache size!)
 	maxIndices = std::max(globalRendering->glslMaxRecommendedIndices, 1024);
 	maxVertices = std::max(globalRendering->glslMaxRecommendedVertices, 1024);
-	numPoolPieces = 0;
 
 	Assimp::DefaultLogger::create("", Assimp::Logger::VERBOSE);
 	// create a logger for debugging model loading issues
@@ -492,15 +491,8 @@ void CAssParser::Kill()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	Assimp::DefaultLogger::kill();
-	LOG_L(L_INFO, "[AssParser::%s] allocated %u pieces", __func__, numPoolPieces);
-
-	// reuse piece innards when reloading
-	// piecePool.clear();
-	for (uint32_t i = 0; i < numPoolPieces; i++) {
-		piecePool[i].Clear();
-	}
-
-	numPoolPieces = 0;
+	LOG_L(L_INFO, "[AssParser::%s] allocated %u pieces", __func__, static_cast<uint32_t>(pieces.size()));
+	pieces.clear(); pieces.shrink_to_fit();
 }
 
 void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
@@ -890,20 +882,7 @@ static LuaTable GetPieceTableRecursively(
 SAssPiece* CAssParser::AllocPiece()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	std::lock_guard<spring::mutex> lock(poolMutex);
-
-	// lazily reserve pool here instead of during Init
-	// this way games using only one model-type do not
-	// cause redundant allocation
-	if (piecePool.empty())
-		piecePool.resize(MAX_MODEL_OBJECTS * AVG_MODEL_PIECES);
-
-	if (numPoolPieces >= piecePool.size()) {
-		throw std::bad_alloc();
-		return nullptr;
-	}
-
-	return &piecePool[numPoolPieces++];
+	return static_cast<SAssPiece*>(AllocPieceImpl());
 }
 
 SAssPiece* CAssParser::LoadPiece(

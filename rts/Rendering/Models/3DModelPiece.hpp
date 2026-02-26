@@ -16,39 +16,11 @@
 struct S3DModel;
 struct S3DModelPiece {
 	S3DModelPiece() = default;
+	S3DModelPiece(const S3DModelPiece&) = delete;
+	S3DModelPiece(S3DModelPiece&& p) noexcept = delete;
 
-	virtual void Clear() {
-		name = {};
-		children = {};
-
-		for (S3DModelPiecePart& p : shatterParts) {
-			p.renderData = {};
-		}
-
-		tmpVerts = {};
-		tmpIndcs = {};
-		tmpShIndcs = {};
-
-		parent = nullptr;
-		colvol = {};
-
-		bposeTransform.LoadIdentity();
-		bposeTransformInv.LoadIdentity();
-
-		emitPos = ZeroVector;
-		emitDir = ZeroVector;
-
-		offset = ZeroVector;
-		goffset = ZeroVector;
-		scale = 1.0f;
-
-		aabb.Reset();
-
-		relVertOff = ~0u;
-		relVertCnt = 0;
-		relIndxOff = ~0u;
-		relIndxCnt = 0;
-	}
+	S3DModelPiece& operator = (const S3DModelPiece& p) = delete;
+	S3DModelPiece& operator = (S3DModelPiece&& p) noexcept = delete;
 
 	void SetEmitters();
 

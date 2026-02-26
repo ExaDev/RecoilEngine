@@ -139,23 +139,14 @@ void C3DOParser::Init()
 	while (!parser.Eof()) {
 		teamTextures.insert(StringToLower(parser.GetCleanLine()));
 	}
-
-	numPoolPieces = 0;
 }
 
 void C3DOParser::Kill()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	teamTextures.clear();
-	LOG_L(L_INFO, "[3DOParser::%s] allocated %u pieces", __func__, numPoolPieces);
-
-	// reuse piece innards when reloading
-	// piecePool.clear();
-	for (uint32_t i = 0; i < numPoolPieces; i++) {
-		piecePool[i].Clear();
-	}
-
-	numPoolPieces = 0;
+	LOG_L(L_INFO, "[3DOParser::%s] allocated %u pieces", __func__, static_cast<uint32_t>(pieces.size()));
+	pieces.clear(); pieces.shrink_to_fit();
 }
 
 
@@ -324,20 +315,7 @@ void S3DOPiece::GetPrimitives(
 S3DOPiece* C3DOParser::AllocPiece()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	std::lock_guard<spring::mutex> lock(poolMutex);
-
-	// lazily reserve pool here instead of during Init
-	// this way games using only one model-type do not
-	// cause redundant allocation
-	if (piecePool.empty())
-		piecePool.resize(MAX_MODEL_OBJECTS * AVG_MODEL_PIECES);
-
-	if (numPoolPieces >= piecePool.size()) {
-		throw std::bad_alloc();
-		return nullptr;
-	}
-
-	return &piecePool[numPoolPieces++];
+	return static_cast<S3DOPiece*>(AllocPieceImpl());
 }
 
 S3DOPiece* C3DOParser::LoadPiece(S3DModel* model, S3DOPiece* parent, const std::vector<uint8_t>& buf, int pos)
