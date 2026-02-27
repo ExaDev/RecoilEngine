@@ -67,6 +67,12 @@ target_link_libraries(engine-headless no-sound ${engineHeadlessLibraries} GameHe
 # Export symbols for plugin access (replaces CMP0065 OLD behavior)
 set_target_properties(engine-headless PROPERTIES ENABLE_EXPORTS TRUE)
 
+# Suppress "ignoring duplicate libraries" linker warning on macOS.
+# Static library transitive deps cause benign duplicates in the link line.
+if(APPLE)
+	target_link_options(engine-headless PRIVATE "LINKER:-no_warn_duplicate_libraries")
+endif()
+
 if(MSVC)
     target_link_libraries(engine-headless engine-natvis)
 endif()
