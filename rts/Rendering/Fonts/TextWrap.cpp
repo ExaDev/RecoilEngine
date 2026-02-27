@@ -1,10 +1,12 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
-/// REMEMBER TO PORT BAR105 CHANGES!!!
+
+#include <cstdint>
 
 #include "TextWrap.h"
 #include "glFont.h"
 #include "FontLogSection.h"
 #include "FontConstants.hpp"
+#include "TextIterator.hpp"
 #include "System/Log/ILog.h"
 #include "System/SpringMath.h"
 #include "System/StringUtil.h"
@@ -72,7 +74,7 @@ static inline bool IsLowerCase(const char32_t& c)
  * @param strlen total length of the word
  * @return penalty (smaller is better) to split a word at that position
  */
-static inline float GetPenalty(const char32_t& c, unsigned int strpos, unsigned int strlen)
+static inline float GetPenalty(const char32_t& c, uint32_t strpos, uint32_t strlen)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	const float dist = strlen - strpos;
@@ -127,36 +129,51 @@ TextWrapHelpers::word CTextWrap::SplitWord(TextWrapHelpers::word& w, float wante
 			}
 		}
 
-		float width = 0.0f;
-		int i = 0;
-		float min_penalty = 1e9;
-		unsigned int goodbreak = 0;
-		char32_t c = utf8::GetNextChar(w.text,i);
-		const GlyphInfo* curGlyph = &GetGlyph(c);
-		const GlyphInfo* nextGlyph = curGlyph;
+		// Use TextIterator to iterate through the word
+		struct SplitWordHandler : public TextIteratorHandler {
+			CTextWrap* font;
+			float wantedWidth;
+			bool smart;
+			float width = 0.0f;
+			float minPenalty = 1e9f;
+			uint32_t goodbreak = 0;
+			const GlyphInfo* prevGlyph = nullptr;
+			int textLen;
 
-		do {
-			const int lastCharPos = i;
-			const char32_t co     = c;
-			curGlyph = nextGlyph;
-			c = utf8::GetNextChar(w.text,i);
-			nextGlyph = &GetGlyph(c);
-			width += GetKerning(*curGlyph, *nextGlyph);
+			SplitWordHandler(CTextWrap* f, float w, bool s, int len)
+				: font(f), wantedWidth(w), smart(s), textLen(len) {}
 
-			if (width > wantedWidth) {
-				break;
-			}
-
-			if (smart) {
-				const float penalty = GetPenalty(co, lastCharPos, w.text.length());
-				if (penalty < min_penalty) {
-					min_penalty = penalty;
-					goodbreak   = lastCharPos;
+			bool OnPrintable(const CharEvent& e) override {
+				char32_t c = std::get<char32_t>(e.value);
+				const GlyphInfo* curGlyph = &font->GetGlyph(c);
+				if (prevGlyph != nullptr) {
+					width += font->GetKerning(*prevGlyph, *curGlyph);
 				}
-			} else {
-				goodbreak = i;
+				if (width > wantedWidth) {
+					return false; // stop further processing
+				}
+				if (smart) {
+					float penalty = GetPenalty(c, e.startIdx, static_cast<uint32_t>(textLen));
+					if (penalty < minPenalty) {
+						minPenalty = penalty;
+						goodbreak = e.startIdx;
+					}
+				} else {
+					goodbreak = e.endIdx;
+				}
+				prevGlyph = curGlyph;
+				return true;
 			}
-		} while(i < w.text.length());
+			bool OnSpace(const CharEvent& e) override {
+				return OnPrintable(e); // treat spaces like printable
+			}
+		};
+
+		SplitWordHandler handler(this, wantedWidth, smart, w.text.length());
+		TextIterator iterator(w.text, handler);
+		iterator.Execute();
+
+		uint32_t goodbreak = handler.goodbreak;
 
 		w2.text  = toustring(w.text.substr(0,goodbreak));
 		w2.width = GetTextWidth(w2.text);
@@ -289,7 +306,7 @@ void CTextWrap::WrapTextConsole(std::list<word>& words, float maxWidth, float ma
 	if (words.empty() || (GetLineHeight()<=0.0f))
 		return;
 	const bool splitAllWords = false;
-	const unsigned int maxLines = (unsigned int)std::floor(std::max(0.0f, maxHeight / GetLineHeight()));
+	const uint32_t maxLines = (uint32_t)std::floor(std::max(0.0f, maxHeight / GetLineHeight()));
 
 	line* currLine;
 	word linebreak;
@@ -596,7 +613,7 @@ int CTextWrap::WrapInPlace(spring::u8string& text, float _fontSize, float maxWid
 	if (words.empty())
 		return 0;
 
-	unsigned int numlines = 1;
+	uint32_t numlines = 1;
 
 	for (const auto& w: words) {
 		if (w.isSpace) {
