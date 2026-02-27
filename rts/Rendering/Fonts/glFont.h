@@ -96,13 +96,7 @@ public:
 	void SetTextDepth(float z = 0.0f) { textDepth.x = z; }
 	void SetOutlineDepth(float z = 0.0f) { textDepth.y = z; }
 
-	const auto& GetTextDepth() const { return textDepth; }
-	const auto& GetTextColor() const { return textColor; }
-	const auto& GetOutlineColor() const { return outlineColor; }
 
-	const auto& GetBaseTextColor() const { return baseTextColor; }
-	const auto& GetBaseOutlineColor() const { return baseOutlineColor; }
-	const auto GetAutoOutlineColor() const { return autoOutlineColor; }
 
 	float GetCharacterWidth(const char32_t c);
 
@@ -116,6 +110,13 @@ public:
 	void GetStats(std::array<size_t, 8>& stats) const;
 private:
 	static const SColor* ChooseOutlineColor(const SColor& textColor);
+
+	// Friend classes to avoid exposing internal state via getters
+	friend class WidthCalculator;
+	friend class HeightCalculator;
+	friend class GlyphScanner;
+	friend struct SplitIntoLinesHandler;
+	template<int, int, bool> friend class StringRenderer;
 
 	template<int shiftXC, int shiftYC, bool outline>
 	void RenderStringImpl(float x, float y, float scaleX, float scaleY, const std::string& str);

@@ -134,9 +134,12 @@ public:
 	float GetLineHeight() const { return lineHeight; }
 	float GetDescender() const { return fontDescender; }
 	int GetTexture() const { return glyphAtlasTextureID; }
-	const auto GetFontSize() const { return fontSize; }
 
-	auto& GetFontRenderer() { return fontRenderer; }
+	friend class WidthCalculator;
+	friend class HeightCalculator;
+	friend class GlyphScanner;
+	friend struct SplitIntoLinesHandler;
+	template<int, int, bool> friend class StringRenderer;
 
 	const std::string& GetFamily() const { return fontFamily; }
 	const std::string& GetStyle() const { return fontStyle; }

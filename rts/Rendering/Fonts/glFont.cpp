@@ -622,7 +622,7 @@ public:
 	bool OnColorCode(const CharEvent& e) override {
 		const auto& newTextColor = std::get<SColor>(e.value);
 
-		if (font->GetAutoOutlineColor())
+		if (font->autoOutlineColor)
 			font->SetColors(&newTextColor, nullptr);
 		else
 			font->SetTextColor(&newTextColor);
@@ -637,7 +637,7 @@ public:
 	}
 
 	bool OnColorReset(const CharEvent& e) override {
-		font->SetColors(&font->GetBaseTextColor(), &font->GetBaseOutlineColor());
+		font->SetColors(&font->baseTextColor, &font->baseOutlineColor);
 		return true;
 	}
 
@@ -674,12 +674,12 @@ public:
 		const float tx1 = tc.x1();
 		const float ty1 = tc.y1();
 
-		const auto& textDepth = font->GetTextDepth();
-		const auto& textColor = font->GetTextColor();
-		const auto& outlineColor = font->GetOutlineColor();
-		const auto fontSize = font->GetFontSize();
+		const auto& textDepth = font->textDepth;
+		const auto& textColor = font->textColor;
+		const auto& outlineColor = font->outlineColor;
+		const auto fontSize = font->fontSize;
 
-		auto& fontRenderer = font->GetFontRenderer();
+		auto& fontRenderer = font->fontRenderer;
 
 		if constexpr (shiftXC > 0 || shiftYC > 0 || outline) {
 			const auto& stc = curGlyphPtr->shadowTexCord;

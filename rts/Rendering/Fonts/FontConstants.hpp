@@ -14,4 +14,4 @@ static const std::string ellipsisUTF8 = utf8::FromUnicode(ellipsisUTF16);
 
 static constexpr char8_t CR = '\r';
 static constexpr char8_t LF = '\n';
-static constexpr spring::u8string CRLF = "\r\n";
+static constexpr const char* CRLF = "\r\n";
