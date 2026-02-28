@@ -283,13 +283,14 @@ namespace spring {
 		type_list_exec_at_impl(index, std::forward<TypeList>(typeList), std::forward<Func>(f), std::make_index_sequence<TypeListDecayed::size>{});
 	}
 
+	// Executes f with each type in the type list, returns tuple of results (void return returns nothing)
 	template<typename... T, typename F>
 	constexpr decltype(auto) type_list_exec_all(type_list_t<T...>, F&& f) {
 		if constexpr (std::is_void_v<return_type_t<F>>) {
-			std::forward_as_tuple(f(T{})...);
+			(f(T{}), ...);
 		}
 		else {
-			(f(T{}), ...);
+			return std::forward_as_tuple(f(T{})...);
 		}
 	}
 
@@ -307,6 +308,9 @@ namespace spring {
 			throw std::out_of_range("tuple index out of range");
 	}
 
+	// Executes function f with the tuple element at the given index.
+	// NOTE: Unlike the previous recursive implementation, this version throws std::out_of_range
+	// if index >= tuple size, rather than silently doing nothing.
 	template<typename Tuple, typename Func>
 	inline void tuple_exec_at(size_t index, Tuple& t, Func&& f)
 	{
@@ -375,12 +379,6 @@ namespace spring {
 
 	template<auto FuncPtr, typename... FallbackSignature>
 	using func_ptr_signature_t = typename func_ptr_signature<FuncPtr, FallbackSignature...>::type;
-
-	template<class T>
-	constexpr T& as_mutable(const T& t) noexcept
-	{
-		return const_cast<std::decay_t<T>&>(t);
-	}
 };
 
 namespace Recoil {
