@@ -309,8 +309,7 @@ namespace spring {
 	}
 
 	// Executes function f with the tuple element at the given index.
-	// NOTE: Unlike the previous recursive implementation, this version throws std::out_of_range
-	// if index >= tuple size, rather than silently doing nothing.
+	// throws std::out_of_range if index >= tuple size
 	template<typename Tuple, typename Func>
 	inline void tuple_exec_at(size_t index, Tuple& t, Func&& f)
 	{
