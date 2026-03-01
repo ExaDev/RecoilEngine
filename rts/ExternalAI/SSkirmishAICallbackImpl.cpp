@@ -4548,6 +4548,10 @@ EXPORT(float) skirmishAiCallback_WeaponDef_getTrajectoryHeight(int skirmishAIId,
 	return getWeaponDefById(skirmishAIId, weaponDefId)->trajectoryHeight;
 }
 
+EXPORT(float) skirmishAiCallback_WeaponDef_getExpiredDrag(int skirmishAIId, int weaponDefId) {
+	return getWeaponDefById(skirmishAIId, weaponDefId)->expiredDrag;
+}
+
 EXPORT(bool) skirmishAiCallback_WeaponDef_isLargeBeamLaser(int skirmishAIId, int weaponDefId) {
 	return getWeaponDefById(skirmishAIId, weaponDefId)->largeBeamLaser;
 }
@@ -5482,6 +5486,7 @@ static void skirmishAiCallback_init(SSkirmishAICallback* callback) {
 	callback->WeaponDef_getWobble = &skirmishAiCallback_WeaponDef_getWobble;
 	callback->WeaponDef_getDance = &skirmishAiCallback_WeaponDef_getDance;
 	callback->WeaponDef_getTrajectoryHeight = &skirmishAiCallback_WeaponDef_getTrajectoryHeight;
+	callback->WeaponDef_getExpiredDrag = &skirmishAiCallback_WeaponDef_getExpiredDrag;
 	callback->WeaponDef_isLargeBeamLaser = &skirmishAiCallback_WeaponDef_isLargeBeamLaser;
 	callback->WeaponDef_isShield = &skirmishAiCallback_WeaponDef_isShield;
 	callback->WeaponDef_isShieldRepulser = &skirmishAiCallback_WeaponDef_isShieldRepulser;
