@@ -59,7 +59,7 @@ set(demoToolSpringSources
 
 list(APPEND demoToolSpringSources ${PLATFORM_SRCS})
 
-add_executable(demotool EXCLUDE_FROM_ALL DemoTool.cpp ${demoToolSpringSources})
+add_executable(demotool DemoTool.cpp ${demoToolSpringSources})
 if (MINGW)
 	# To enable console output/force a console window to open
 	set_target_properties(demotool PROPERTIES LINK_FLAGS "-Wl,-subsystem,console")
@@ -74,3 +74,5 @@ target_link_libraries(demotool
 		Tracy::TracyClient
 	)
 add_dependencies(demotool generateVersionFiles)
+
+install(TARGETS demotool RUNTIME DESTINATION ${BINDIR})
