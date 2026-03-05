@@ -2,10 +2,12 @@
 
 #include "StreamSink.h"
 #include "Backend.h"
+#include "System/Threading/SpringThreading.h"
 
 #include <ostream>
 #include <string>
 #include <cstring>
+#include <mutex>
 
 
 static std::ostream* logStreamInt = NULL;
@@ -25,16 +27,14 @@ extern "C" {
  */
 ///@{
 
-/// Records a log entry
-void log_sink_record_stream(int level, const char* section, const char* record)
-{
-	if (logStreamInt != NULL) {
-		logStreamInt->write(record, strlen(record));
-		(*logStreamInt) << std::endl;
-	}
-}
+/// Records a log entry (forward declaration)
+void log_sink_record_stream(int level, const char* section, const char* record);
 
 ///@}
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
 
 
 namespace {
@@ -46,10 +46,33 @@ namespace {
 		~StreamSinkRegistrator() {
 			log_backend_unregisterSink(&log_sink_record_stream);
 		}
+
+		spring::spinlock spinlock;
 	} streamSinkRegistrator;
 }
 
 #ifdef __cplusplus
-} // extern "C"
+extern "C" {
 #endif
 
+/**
+ * @name logging_sink_stream
+ * ILog.h sink implementation.
+ */
+///@{
+
+/// Records a log entry
+void log_sink_record_stream(int level, const char* section, const char* record)
+{
+	if (logStreamInt != NULL) {
+		std::lock_guard<spring::spinlock> lock(streamSinkRegistrator.spinlock);
+		logStreamInt->write(record, strlen(record));
+		(*logStreamInt) << std::endl;
+	}
+}
+
+///@}
+
+#ifdef __cplusplus
+} // extern "C"
+#endif

@@ -12,15 +12,18 @@
 #include "System/MainDefines.h"
 
 #include <cstdio> // for stderr, stdout
+#include <mutex>
 
+#include "System/Threading/SpringThreading.h"
+
+static bool colorizedOutput = false;
+
+// Global registrator instance - must be defined before the function that uses it
+ConsoleSinkRegistrator consoleSinkRegistrator;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-static bool colorizedOutput = false;
-
-
 
 /**
  * @name logging_sink_console
@@ -37,6 +40,8 @@ void log_console_colorizedOutput(bool enable) {
 /// Records a log entry
 static void log_sink_record_console(int level, const char* section, const char* record)
 {
+	std::lock_guard<spring::spinlock> lock(consoleSinkRegistrator.spinlock);
+
 	char framePrefix[128] = {'\0'};
 	log_framePrefixer_createPrefix(framePrefix, sizeof(framePrefix));
 

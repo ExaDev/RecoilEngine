@@ -3,6 +3,8 @@
 #ifndef LOG_CONSOLE_SINK_H
 #define LOG_CONSOLE_SINK_H
 
+#include "System/Threading/SpringThreading.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -20,6 +22,8 @@ void log_console_colorizedOutput(bool enable);
 struct ConsoleSinkRegistrator {
     ConsoleSinkRegistrator();
     ~ConsoleSinkRegistrator();
+
+    spring::spinlock spinlock;
 };
 
 #endif // LOG_CONSOLE_SINK_H
