@@ -11,6 +11,7 @@
 #include "DefaultFilter.h"
 #include "LogUtil.h"
 #include "System/MainDefines.h"
+#include "System/Threading/SpringThreading.h"
 
 #define MAX_LOG_SINKS 8
 
@@ -64,6 +65,8 @@ namespace log_formatter {
 	}
 }
 
+// Global spinlock to protect all sink calls
+static spring::spinlock sinkMutex;
 
 #ifdef __cplusplus
 extern "C" {
@@ -116,9 +119,12 @@ void log_backend_record(int level, const char* section, const char* fmt, va_list
 		return;
 
 	// sink the record into each registered sink
-	for (size_t i = 0; i < log_formatter::numSinks; i++) {
-		assert(sinks[i] != nullptr);
-		sinks[i](level, section, cur_record.msg);
+	{
+		std::scoped_lock lock(sinkMutex);
+		for (size_t i = 0; i < log_formatter::numSinks; i++) {
+			assert(sinks[i] != nullptr);
+			sinks[i](level, section, cur_record.msg);
+		}
 	}
 
 	if (cur_record.cnt > 0)
@@ -131,6 +137,7 @@ void log_backend_record(int level, const char* section, const char* fmt, va_list
 void log_backend_cleanup() {
 	const auto& funcs = log_formatter::cleanupFuncs;
 
+	std::scoped_lock lock(sinkMutex);
 	for (size_t i = 0; i < log_formatter::numFuncs; i++) {
 		assert(funcs[i] != nullptr);
 		funcs[i]();
