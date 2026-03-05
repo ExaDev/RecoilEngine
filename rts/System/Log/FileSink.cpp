@@ -14,9 +14,6 @@
 
 #include <algorithm>
 #include <vector>
-#include <mutex>
-
-#include "System/Threading/SpringThreading.h"
 
 
 namespace log_file {
@@ -291,42 +288,9 @@ FILE* log_file_getLogFileStream(const char* filePath) {
  */
 ///@{
 
-/// Records a log entry (forward declaration)
-static void log_sink_record_file(int level, const char* section, const char* record);
-
-/// Cleans up all log streams, by flushing them. (forward declaration)
-static void log_sink_cleanup_file();
-
-///@}
-
-
-namespace {
-	/// Auto-registers the sink defined in this file before main() is called
-	struct FileSinkRegistrator {
-		FileSinkRegistrator() {
-			log_backend_registerSink(&log_sink_record_file);
-			log_backend_registerCleanup(&log_sink_cleanup_file);
-		}
-		~FileSinkRegistrator() {
-			log_backend_unregisterSink(&log_sink_record_file);
-			log_backend_unregisterCleanup(&log_sink_cleanup_file);
-		}
-
-		spring::spinlock spinlock;
-	} fileSinkRegistrator;
-}
-
-/**
- * @name logging_sink_file
- * ILog.h sink implementation.
- */
-///@{
-
 /// Records a log entry
 static void log_sink_record_file(int level, const char* section, const char* record)
 {
-	std::lock_guard<spring::spinlock> lock(fileSinkRegistrator.spinlock);
-
 	if (log_file::validTracker && log_file::isActivelyLogging()) {
 		// write buffer to log file
 		log_file::writeBufferToFiles();
@@ -349,6 +313,21 @@ static void log_sink_cleanup_file() {
 }
 
 ///@}
+
+
+namespace {
+	/// Auto-registers the sink defined in this file before main() is called
+	struct FileSinkRegistrator {
+		FileSinkRegistrator() {
+			log_backend_registerSink(&log_sink_record_file);
+			log_backend_registerCleanup(&log_sink_cleanup_file);
+		}
+		~FileSinkRegistrator() {
+			log_backend_unregisterSink(&log_sink_record_file);
+			log_backend_unregisterCleanup(&log_sink_cleanup_file);
+		}
+	} fileSinkRegistrator;
+}
 
 #ifdef __cplusplus
 } // extern "C"
