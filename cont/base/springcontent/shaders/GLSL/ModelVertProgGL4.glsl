@@ -108,6 +108,7 @@ out Data {
 
 	vec4 worldPos;
 	vec3 worldNormal;
+	vec4 worldTangent;
 
 	// main light vector(s)
 	vec3 worldCameraDir;
@@ -264,12 +265,13 @@ Transform Lerp(Transform t0, Transform t1, float a) {
 
 // END TRS LIB
 
-void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
+void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal, out vec3 msTangent)
 {
 	bool staticModel = (matrixMode > 0);
 
 	vec4 piecePos = vec4(pos, 1.0);
 	vec4 normal4 = vec4(normal, 0.0);
+	vec4 tangent4 = vec4(tangent.xyz, 0.0); // tangent.w (handedness) is not transformed
 
 	uint bID0 = UnpackBoneID(0u);
 	
@@ -303,12 +305,14 @@ void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
 
 	msPosition = ApplyTransform(deltaTx, piecePos);
 	msNormal   = ApplyTransform(deltaTx, normal4).xyz;
+	msTangent  = ApplyTransform(deltaTx, tangent4).xyz;
 
 	if (staticModel || weights[0] == 1.0)
 		return;
 
 	msPosition *= weights[0];
 	msNormal   *= weights[0];
+	msTangent  *= weights[0];
 
 	// Multi-bone skinning
 	// For model-space vertices, we need: boneTx * bposeInv * vertexInModelSpace
@@ -328,11 +332,14 @@ void GetModelSpaceVertex(out vec4 msPosition, out vec3 msNormal)
 
 		// For model-space vertices: boneTx * bposeInvTra * piecePos
 		// This transforms the model-space vertex to the space of bone bi
-		vec4 txPiecePos = ApplyTransform(ApplyTransform(boneTx, bposeInvTra), piecePos);
-		vec3 txPieceNormal = ApplyTransform(ApplyTransform(boneTx, bposeInvTra), normal4).xyz;
+		Transform skinTx = ApplyTransform(boneTx, bposeInvTra);
+		vec4 txPiecePos = ApplyTransform(skinTx, piecePos);
+		vec3 txPieceNormal = ApplyTransform(skinTx, normal4).xyz;
+		vec3 txPieceTangent = ApplyTransform(skinTx, tangent4).xyz;
 
-		msPosition += txPiecePos    * weights[bi];
-		msNormal   += txPieceNormal * weights[bi];
+		msPosition += txPiecePos     * weights[bi];
+		msNormal   += txPieceNormal  * weights[bi];
+		msTangent  += txPieceTangent * weights[bi];
 	}
 }
 
@@ -342,11 +349,16 @@ void main(void)
 
 	vec4 modelPos;
 	vec3 modelNormal;
-	GetModelSpaceVertex(modelPos, modelNormal);
+	vec3 modelTangentXYZ;
+	GetModelSpaceVertex(modelPos, modelNormal, modelTangentXYZ);
+
+	// Preserve the handedness sign (w component) - it should NOT be transformed
+	float tangentHandedness = tangent.w;
 
 	if (staticModel) {
 		worldPos = staticModelMatrix * modelPos;
 		worldNormal = mat3(staticModelMatrix) * modelNormal;
+		worldTangent = vec4(mat3(staticModelMatrix) * modelTangentXYZ, tangentHandedness);
 	} else {
 		// do interpolation
 		Transform tx = Lerp(
@@ -358,6 +370,7 @@ void main(void)
 		worldPos = ApplyTransform(tx, modelPos);
 		tx.trSc = vec4(0, 0, 0, 1); //nullify the transform part
 		worldNormal = ApplyTransform(tx, modelNormal);
+		worldTangent = vec4(ApplyTransform(tx, modelTangentXYZ), tangentHandedness);
 	}
 
 	gl_ClipDistance[0] = dot(modelPos, clipPlane0); //upper construction clip plane
