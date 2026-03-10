@@ -349,8 +349,8 @@ void main(void)
 
 	vec4 modelPos;
 	vec3 modelNormal;
-	vec3 modelTangentXYZ;
-	GetModelSpaceVertex(modelPos, modelNormal, modelTangentXYZ);
+	vec3 modelTangent;
+	GetModelSpaceVertex(modelPos, modelNormal, modelTangent);
 
 	// Preserve the handedness sign (w component) - it should NOT be transformed
 	float tangentHandedness = tangent.w;
@@ -358,7 +358,7 @@ void main(void)
 	if (staticModel) {
 		worldPos = staticModelMatrix * modelPos;
 		worldNormal = mat3(staticModelMatrix) * modelNormal;
-		worldTangent = vec4(mat3(staticModelMatrix) * modelTangentXYZ, tangentHandedness);
+		worldTangent = vec4(mat3(staticModelMatrix) * modelTangent, tangentHandedness);
 	} else {
 		// do interpolation
 		Transform tx = Lerp(
@@ -370,7 +370,7 @@ void main(void)
 		worldPos = ApplyTransform(tx, modelPos);
 		tx.trSc = vec4(0, 0, 0, 1); //nullify the transform part
 		worldNormal = ApplyTransform(tx, modelNormal);
-		worldTangent = vec4(ApplyTransform(tx, modelTangentXYZ), tangentHandedness);
+		worldTangent = vec4(ApplyTransform(tx, modelTangent), tangentHandedness);
 	}
 
 	gl_ClipDistance[0] = dot(modelPos, clipPlane0); //upper construction clip plane
