@@ -29,18 +29,23 @@ void S3DModelPiece::DrawStaticLegacy(bool bind, bool bindPosMat) const
 	if (bind) S3DModelHelpers::UnbindLegacyAttrVBOs();
 }
 
+void S3DModelPiece::DrawStaticLegacyRecImpl() const
+{
+	// Vertices are already in model space
+	// so no per-piece transform is needed — just draw and recurse into children.
+	DrawElements();
+
+	for (const S3DModelPiece* childPiece : children) {
+		childPiece->DrawStaticLegacyRecImpl();
+	}
+}
+
 // only used by projectiles with the PF_Recursive flag
 void S3DModelPiece::DrawStaticLegacyRec() const
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	S3DModelHelpers::BindLegacyAttrVBOs();
-
-	DrawStaticLegacy(false, false);
-
-	for (const S3DModelPiece* childPiece : children) {
-		childPiece->DrawStaticLegacy(false, false);
-	}
-
+	DrawStaticLegacyRecImpl();
 	S3DModelHelpers::UnbindLegacyAttrVBOs();
 }
 

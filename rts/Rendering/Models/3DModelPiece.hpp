@@ -58,7 +58,7 @@ public:
 	void SetGlobalOffset();
 private:
 	void CreateShatterPiecesVariation(int num);
-	void DrawStaticLegacyRecImpl(const float3& rootT) const;
+	void DrawStaticLegacyRecImpl() const;
 	CollisionVolume colvol;
 public:
 	std::string name;

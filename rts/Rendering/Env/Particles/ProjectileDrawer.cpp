@@ -972,7 +972,12 @@ void CProjectileDrawer::DrawProjectileModel(const CProjectile* p)
 
 			auto scopedPushPop = spring::ScopedNullResource(glPushMatrix, glPopMatrix);
 
-			Transform pieceTra(CQuaternion::MakeFrom(pp->GetDrawAngle(), pp->spinVec), pp->drawPos);
+			Transform pieceTra(CQuaternion::MakeFrom(pp->GetDrawAngle() * math::DEG_TO_RAD, pp->spinVec), pp->drawPos);
+			// Vertices are stored in model space (bpose baked in during TransferPiecesToSkinnedMesh).
+			// bposeTransformInv normalises back to local piece space, so the result is:
+			//   spin.Rotate(v_local) + drawPos
+			// — the piece spins cleanly around spinVec in its local-space shape, centred at drawPos.
+			// (Equivalent to master's glTranslate(drawPos)*glRotate(spin) path for local-space verts.)
 			const CMatrix44f deltaMat = (pieceTra * pp->omp->bposeTransformInv).ToMatrix();
 			glMultMatrixf(deltaMat);
 
