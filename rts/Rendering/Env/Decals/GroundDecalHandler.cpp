@@ -230,6 +230,9 @@ void CGroundDecalHandler::AddTexToAtlas(const std::string& name, const std::stri
 	else if (reportMissingFile) {
 		LOG_L(L_WARNING, "%s", fmt::format("{}. Decal file not found: \"{}\"", errMsg, fn).c_str());
 	}
+	else {
+		LOG_L(L_DEBUG, "%s", fmt::format("{}. Decal file not found: \"{}\"", errMsg, fn).c_str());
+	}
 }
 
 void CGroundDecalHandler::AddBuildingDecalTextures()
