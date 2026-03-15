@@ -548,6 +548,18 @@ endif()
 	# target_include_directories(test_${test_name} PRIVATE ${ENGINE_SOURCE_DIR}/lib/)
 
 ################################################################################
+### HashMapBenchmark
+	set(test_name HashMapBenchmark)
+	set(test_src
+			"${CMAKE_CURRENT_SOURCE_DIR}/other/testHashMapBenchmark.cpp"
+			"${CMAKE_CURRENT_SOURCE_DIR}/lib/catch2/CompactBenchReporter.cpp"
+			${test_Common_sources}
+		)
+	set(test_libs "")
+	set(test_flags "-DNOT_USING_CREG -DNOT_USING_STREFLOP -DBUILDING_AI")
+	add_spring_test(${test_name} "${test_src}" "${test_libs}" "${test_flags}")
+
+################################################################################
 
 
 add_subdirectory(headercheck)
