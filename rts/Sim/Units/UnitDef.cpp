@@ -393,7 +393,8 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 	// otherwise become true for all regular builders)
 	canRestore   = udTable.GetBool("canRestore",   builder) && (terraformSpeed > 0.0f);
 	canRepair    = udTable.GetBool("canRepair",    builder) && (   repairSpeed > 0.0f);
-	canReclaim   = udTable.GetBool("canReclaim",   builder) && (  reclaimSpeed > 0.0f);
+	// defer canReclaim definition
+	//canReclaim   = udTable.GetBool("canReclaim",   builder) && (  reclaimSpeed > 0.0f);
 	canCapture   = udTable.GetBool("canCapture",     false) && (  captureSpeed > 0.0f);
 	canResurrect = udTable.GetBool("canResurrect",   false) && (resurrectSpeed > 0.0f);
 
@@ -674,6 +675,13 @@ UnitDef::UnitDef(const LuaTable& udTable, const std::string& unitName, int id)
 	buildingMask = (std::uint16_t)udTable.GetInt("buildingMask", 1); //1st bit set to 1 constitutes for "normal building"
 	if (IsImmobileUnit())
 		CreateYardMap(udTable.GetString("yardMap", ""));
+
+
+	// now we have pathType and yardMap, so we can determine if the unitDef can reclaim
+	{
+		const bool canReclaimDefault = builder && !IsFactoryUnit();
+		canReclaim = udTable.GetBool("canReclaim", canReclaimDefault) && (reclaimSpeed > 0.0f);
+	}
 
 	leavesGhost   = udTable.GetBool("leavesGhost", IsBuildingUnit());
 
