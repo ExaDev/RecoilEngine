@@ -791,6 +791,11 @@ void CProjectileDrawer::DrawAlpha(bool drawAboveWater, bool drawBelowWater, bool
 			ClipDistance<0>(GL_TRUE)
 		);
 
+		// set old FFP glClipPlane equation to workaround Lua side possibly using FFP rendering in DrawWorldPreParticles,
+		// some drivers (AMD looking at you) might respect the clip plane, although its equation is not set
+		static constexpr GLdouble eq[4] = { 0.0, 0.0, 0.0, 1.0 }; // plane always positive
+		glClipPlane(GL_CLIP_PLANE0, eq);
+
 		eventHandler.DrawWorldPreParticles(drawAboveWater, drawBelowWater, drawReflection, drawRefraction);
 
 		auto& rb = CExpGenSpawnable::GetPrimaryRenderBuffer();
