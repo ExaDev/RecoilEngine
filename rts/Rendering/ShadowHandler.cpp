@@ -765,30 +765,52 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 
 	const auto& worldBounds = game->GetWorldBounds();
 	const auto& frustum = playerCam->GetFrustum();
-	const auto aabbCorners = worldBounds.GetCorners();
 
-	// Phase 1: compute the frustum ∩ worldBounds intersection polytope vertices.
-	// Uses face-by-face Sutherland-Hodgman clipping (sequential plane clips) which
-	// is inherently stable: each clip constrains vertices from prior clips, preventing
-	// the oscillation that independent vertex enumeration suffers from.
+	// Phase 1: compute the shadow map XY bounds by intersecting per-patch terrain
+	// cuboids with the player camera frustum using face-by-face Sutherland-Hodgman
+	// clipping.
+	//
+	// Instead of clipping one large worldBounds AABB (which explodes for near-horizontal
+	// cameras), we iterate the terrain patch grid. Each patch has tight local min/max
+	// height from the unsynced heightmap, so patches far from a horizontal camera are
+	// naturally culled — their thin AABBs don't reach the frustum.
+	static constexpr float PATCH_WS_SIZE = CReadMap::PATCH_SIZE * SQUARE_SIZE;
+
+	const int patchesX = mapDims.mapx / CReadMap::PATCH_SIZE;
+	const int patchesZ = mapDims.mapy / CReadMap::PATCH_SIZE;
+
 	std::vector<float3> polytopeVerts;
 	polytopeVerts.reserve(64);
 
-	// 1) Frustum corners inside AABB — these are polytope vertices that lie in the
-	//    AABB interior, not on any AABB face, so face-by-face clipping can't find them.
-	for (const auto& v : frustum.verts)
-		if (worldBounds.Contains(v))
-			polytopeVerts.push_back(v);
+	for (int pz = 0; pz < patchesZ; ++pz) {
+		for (int px = 0; px < patchesX; ++px) {
+			const auto& heightInfo = readMap->GetUnsyncedHeightInfo(px, pz);
 
-	// 2) Clip each of the 6 AABB faces (as convex quads) against all frustum planes.
-	//    This finds all polytope vertices on AABB faces: surviving AABB corners,
-	//    frustum-edge × AABB-face hits, and AABB-edge × frustum-plane hits — all
-	//    produced by sequential clipping so each vertex is bounded by prior clips.
-	Impl::ClipAABBFacesByPlanes(aabbCorners, frustum.planes.data(), frustum.planes.size(), polytopeVerts);
+			const AABB patchAABB {
+				{ (px + 0) * PATCH_WS_SIZE, heightInfo.x, (pz + 0) * PATCH_WS_SIZE },
+				{ (px + 1) * PATCH_WS_SIZE, heightInfo.y, (pz + 1) * PATCH_WS_SIZE }
+			};
+
+			// Cheap frustum-AABB cull — skip patches entirely outside the frustum
+			if (playerCam->InView(patchAABB) == CCamera::OUTSIDE)
+				continue;
+
+			const auto patchCorners = patchAABB.GetCorners();
+
+			// Frustum corners inside this patch — polytope vertices in the AABB
+			// interior that face-by-face clipping can't find.
+			for (const auto& v : frustum.verts)
+				if (patchAABB.Contains(v))
+					polytopeVerts.push_back(v);
+
+			// Clip each of the 6 patch faces against all frustum planes (S-H).
+			Impl::ClipAABBFacesByPlanes(patchCorners, frustum.planes.data(), frustum.planes.size(), polytopeVerts);
+		}
+	}
 
 	debugPhase1Points = polytopeVerts; // for debug drawing
 
-	// Early out: if camera doesn't intersect the map at all, skip shadow rendering
+	// Early out: if camera doesn't intersect any terrain patch, skip shadow rendering
 	if (polytopeVerts.empty())
 		return;
 
@@ -843,23 +865,24 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 
 		// 4 world-space half-planes forming the tube:
 		//   (viewMatrix * p).x >= XLmin  ⟺  row0·p + tx >= XLmin  ⟺  row0·p + (tx - XLmin) >= 0
-		const float4 tubePlanes[4] = {
+		const float4 shadowCasterBoundsPlanes[4] = {
 			float4( row0,  tx - lightAABB.mins.x),  // x >= mins.x
 			float4(-row0, -tx + lightAABB.maxs.x),  // x <= maxs.x
 			float4( row1,  ty - lightAABB.mins.y),  // y >= mins.y
 			float4(-row1, -ty + lightAABB.maxs.y),  // y <= maxs.y
 		};
 
-		// Clip worldBounds faces by the 4 tube planes (face-by-face S-H)
-		std::vector<float3> tubeVerts;
+		// Clip worldBounds faces by the shadow caster bounds planes (face-by-face S-H)
+		std::vector<float3> shadowCasterVerts;
 		tubeVerts.reserve(32);
 
-		Impl::ClipAABBFacesByPlanes(aabbCorners, tubePlanes, 4, tubeVerts);
+		const auto wbCorners = worldBounds.GetCorners();
+		Impl::ClipAABBFacesByPlanes(wbCorners, shadowCasterBoundsPlanes, 4, shadowCasterVerts);
 
 		// Find max light-space Z among collected vertices
 		// (maxZ is correct: camera at Z=0 looking down -Z, positive Z = behind camera toward light)
 		float maxZ = std::numeric_limits<float>::lowest();
-		for (const auto& v : tubeVerts)
+		for (const auto& v : shadowCasterVerts)
 			maxZ = std::max(maxZ, (viewMatrix * v).z);
 
 		if (maxZ > 0.0f)
