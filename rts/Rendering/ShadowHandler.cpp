@@ -1,5 +1,7 @@
 /* This file is part of the Spring engine (GPL v2 or later), see LICENSE.html */
+#include <cassert>
 #include <cfloat>
+#include <limits>
 
 #include "ShadowHandler.h"
 #include "Game/Camera.h"
@@ -25,7 +27,7 @@
 #include "Rendering/Shaders/Shader.h"
 #include "Rendering/GL/RenderBuffers.h"
 #include "System/Config/ConfigHandler.h"
-#include "System/Geometry/Polygon.hpp"
+
 #include "System/EventHandler.h"
 #include "System/Matrix44f.h"
 #include "System/SpringMath.h"
@@ -217,7 +219,7 @@ void CShadowHandler::DrawFrustumDebugMap() const
 	static constexpr SColor WORLD_BNDS_COL = SColor{   0,   0, 255, 255 };
 	static constexpr SColor WORLD_PCAM_COL = SColor{ 255, 255, 255, 255 };
 	static constexpr SColor CLIPPD_CAM_COL = SColor{   0, 255,   0, 255 };
-	static constexpr SColor WORLD_SCUB_COL = SColor{   0, 255, 255, 255 };
+
 
 	CCamera* shadCam = CCameraHandler::GetCamera(CCamera::CAMTYPE_SHADOW);
 	{
@@ -353,130 +355,18 @@ void CShadowHandler::DrawFrustumDebugMap() const
 		sh.Disable();
 	}
 
-	// clipped world cube by the player's camera
+	// Phase 1 intersection vertices (frustum ∩ worldBounds)
 	{
-		size_t frstIdx = 0;
-		for (size_t currIdx = 0; currIdx < wcClippedByCamera.size() - 1; /*NOOP*/) {
-			size_t nextIdx = (currIdx + 1);
-			rb.AddVertices({ { wcClippedByCamera[currIdx], CLIPPD_CAM_COL}, { wcClippedByCamera[nextIdx], CLIPPD_CAM_COL} });
-			if (wcClippedByCamera[frstIdx] == wcClippedByCamera[nextIdx]) {
-				currIdx += 2; // skip one
-				frstIdx = currIdx;
-			} else {
-				currIdx += 1;
-			}
-		}
+		for (const auto& p : debugPhase1Points)
+			rb.AddVertex({ p, CLIPPD_CAM_COL });
 
-		glLineWidth(4.0f);
+		glPointSize(6.0f);
 		sh.Enable();
-		rb.DrawArrays(GL_LINES);
+		rb.DrawArrays(GL_POINTS);
 		sh.Disable();
-	}
-
-	// clipped world cube by the extended shadow cuboid
-	{
-		size_t frstIdx = 0;
-		for (size_t currIdx = 0; currIdx < wcClippedByShCube.size() - 1; /*NOOP*/) {
-			size_t nextIdx = (currIdx + 1);
-			rb.AddVertices({ { wcClippedByShCube[currIdx], WORLD_SCUB_COL}, { wcClippedByShCube[nextIdx], WORLD_SCUB_COL} });
-			if (wcClippedByShCube[frstIdx] == wcClippedByShCube[nextIdx]) {
-				currIdx += 2; // skip one
-				frstIdx = currIdx;
-			}
-			else {
-				currIdx += 1;
-			}
-		}
-
-		glLineWidth(2.0f);
-		sh.Enable();
-		rb.DrawArrays(GL_LINES);
-		sh.Disable();
-		glLineWidth(1.0f);
+		glPointSize(1.0f);
 	}
 }
-/*
-void CShadowHandler::DumpFrustumData() const
-{
-	const auto& worldBounds = game->GetWorldBounds();
-	const CCamera* playerCam = CCameraHandler::GetCamera(CCamera::CAMTYPE_PLAYER);
-
-	const auto ntl = playerCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NTL);
-	const auto ntr = playerCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NTR);
-	const auto nbr = playerCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NBR);
-	const auto nbl = playerCam->GetFrustumVert(CCamera::FRUSTUM_POINT_NBL);
-
-	const auto ftl = playerCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FTL);
-	const auto ftr = playerCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FTR);
-	const auto fbr = playerCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FBR);
-	const auto fbl = playerCam->GetFrustumVert(CCamera::FRUSTUM_POINT_FBL);
-
-	std::ostringstream ss;
-
-	{
-		const auto wcs = worldBounds.GetCorners();
-
-		Geometry::Polygon worldCube;
-
-		// Left Face
-		worldCube.AddFace(wcs[0], wcs[1], wcs[5], wcs[4]);
-		// Right Face
-		worldCube.AddFace(wcs[2], wcs[6], wcs[7], wcs[3]);
-		// Near Face
-		worldCube.AddFace(wcs[0], wcs[4], wcs[6], wcs[2]);
-		// Far Face
-		worldCube.AddFace(wcs[1], wcs[3], wcs[7], wcs[5]);
-		// Top Face
-		worldCube.AddFace(wcs[4], wcs[5], wcs[7], wcs[6]);
-		// Bottom Face
-		worldCube.AddFace(wcs[0], wcs[2], wcs[3], wcs[1]);
-
-		Geometry::Polygon cameraFrustum;
-
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_LFT));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_RGT));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_BOT));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_TOP));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_NEA));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_FAR));
-
-		worldCube.ClipByInPlace(cameraFrustum);
-
-		for (const auto& face : worldCube.GetFaces()) {
-			ss << "EdgeForm[Directive[Thick, Dashed, Yellow]], Opacity[0.2], Green, Polygon[{";
-			for (const auto& pnt : face.GetPoints()) {
-				ss << "{" << pnt.x << ", " << pnt.y << ", " << pnt.z << "}, ";
-			}
-			ss.seekp(-2, std::ios_base::end);
-			ss << "}],\n";
-		}
-		ss.seekp(-2, std::ios_base::end);
-		ss << '\0';
-	}
-
-	LOG(R"(
-Graphics3D[{
-{EdgeForm[Directive[Thick, Dashed, Blue]], Opacity[0], Cuboid[{%f, %f, %f}, {%f, %f, %f}]},
-{EdgeForm[Directive[Thick, Dashed, Red]], Opacity[0], Polygon[{{%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}}]},
-{EdgeForm[Directive[Thick, Dashed, Red]], Opacity[0], Polygon[{{%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}}]},
-{EdgeForm[Directive[Thick, Dashed, Red]], Opacity[0], Polygon[{{%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}}]},
-{EdgeForm[Directive[Thick, Dashed, Red]], Opacity[0], Polygon[{{%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}}]},
-{EdgeForm[Directive[Thick, Dashed, Red]], Opacity[0], Polygon[{{%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}}]},
-{EdgeForm[Directive[Thick, Dashed, Red]], Opacity[0], Polygon[{{%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}, {%f, %f, %f}}]},
-%s
-}])"
-	, worldBounds.mins.x, worldBounds.mins.y, worldBounds.mins.z, worldBounds.maxs.x, worldBounds.maxs.y, worldBounds.maxs.z
-	, ntl.x, ntl.y, ntl.z, ntr.x, ntr.y, ntr.z, nbr.x, nbr.y, nbr.z, nbl.x, nbl.y, nbl.z
-	, ftl.x, ftl.y, ftl.z, ftr.x, ftr.y, ftr.z, fbr.x, fbr.y, fbr.z, fbl.x, fbl.y, fbl.z
-	, ntl.x, ntl.y, ntl.z, nbl.x, nbl.y, nbl.z, fbl.x, fbl.y, fbl.z, ftl.x, ftl.y, ftl.z
-	, ntr.x, ntr.y, ntr.z, nbr.x, nbr.y, nbr.z, fbr.x, fbr.y, fbr.z, ftr.x, ftr.y, ftr.z
-	, ntl.x, ntl.y, ntl.z, ntr.x, ntr.y, ntr.z, ftr.x, ftr.y, ftr.z, ftl.x, ftl.y, ftl.z
-	, nbl.x, nbl.y, nbl.z, nbr.x, nbr.y, nbr.z, fbr.x, fbr.y, fbr.z, fbl.x, fbl.y, fbl.z
-	, ss.str().c_str()
-	);
-}
-*/
-
 void CShadowHandler::FreeFBOAndTextures() {
 	if (shadowsFBO.IsValid()) {
 		shadowsFBO.Bind();
@@ -785,6 +675,138 @@ void CShadowHandler::DrawShadowPasses()
 }
 
 namespace Impl {
+	constexpr float EPS = 1e-5f;
+
+	// 12 frustum edges as index pairs into Frustum::verts (NBL=0, NBR=1, NTR=2, NTL=3, FBL=4, FBR=5, FTR=6, FTL=7)
+	constexpr std::array<std::pair<uint32_t, uint32_t>, 12> kFrustumEdges = {{
+		// near face
+		{CCamera::FRUSTUM_POINT_NBL, CCamera::FRUSTUM_POINT_NBR},
+		{CCamera::FRUSTUM_POINT_NBR, CCamera::FRUSTUM_POINT_NTR},
+		{CCamera::FRUSTUM_POINT_NTR, CCamera::FRUSTUM_POINT_NTL},
+		{CCamera::FRUSTUM_POINT_NTL, CCamera::FRUSTUM_POINT_NBL},
+		// far face
+		{CCamera::FRUSTUM_POINT_FBL, CCamera::FRUSTUM_POINT_FBR},
+		{CCamera::FRUSTUM_POINT_FBR, CCamera::FRUSTUM_POINT_FTR},
+		{CCamera::FRUSTUM_POINT_FTR, CCamera::FRUSTUM_POINT_FTL},
+		{CCamera::FRUSTUM_POINT_FTL, CCamera::FRUSTUM_POINT_FBL},
+		// connecting
+		{CCamera::FRUSTUM_POINT_NBL, CCamera::FRUSTUM_POINT_FBL},
+		{CCamera::FRUSTUM_POINT_NBR, CCamera::FRUSTUM_POINT_FBR},
+		{CCamera::FRUSTUM_POINT_NTR, CCamera::FRUSTUM_POINT_FTR},
+		{CCamera::FRUSTUM_POINT_NTL, CCamera::FRUSTUM_POINT_FTL},
+	}};
+
+	// 12 AABB edges as index pairs into AABB::CalcCorners ordering
+	// [0]=(mins.x,mins.y,mins.z) [1]=(mins.x,mins.y,maxs.z) [2]=(maxs.x,mins.y,mins.z) [3]=(maxs.x,mins.y,maxs.z)
+	// [4]=(mins.x,maxs.y,mins.z) [5]=(mins.x,maxs.y,maxs.z) [6]=(maxs.x,maxs.y,mins.z) [7]=(maxs.x,maxs.y,maxs.z)
+	constexpr std::array<std::pair<uint32_t, uint32_t>, 12> kAABBEdges = {{
+		// X-axis
+		{0, 2}, {1, 3}, {4, 6}, {5, 7},
+		// Y-axis
+		{0, 4}, {1, 5}, {2, 6}, {3, 7},
+		// Z-axis
+		{0, 1}, {2, 3}, {4, 5}, {6, 7},
+	}};
+
+	bool AABBContainsEps(const AABB& box, const float3& p) {
+		return p.x >= box.mins.x - EPS && p.x <= box.maxs.x + EPS
+		    && p.y >= box.mins.y - EPS && p.y <= box.maxs.y + EPS
+		    && p.z >= box.mins.z - EPS && p.z <= box.maxs.z + EPS;
+	}
+
+	bool PointInsidePlanes(const float3& p, const float4* planes, int count) {
+		for (int i = 0; i < count; ++i) {
+			if (float3(planes[i]).dot(p) + planes[i].w < -EPS)
+				return false;
+		}
+		return true;
+	}
+
+	// Collect intersection points of segment [a,b] with the 6 axis-aligned faces of an AABB
+	void CollectSegmentAABBFaceHits(const float3& a, const float3& b, const AABB& box, std::vector<float3>& out) {
+		const float faceVals[6] = { box.mins.x, box.maxs.x, box.mins.y, box.maxs.y, box.mins.z, box.maxs.z };
+		const int   faceAxis[6] = { 0, 0, 1, 1, 2, 2 };
+
+		for (int f = 0; f < 6; ++f) {
+			const int axis = faceAxis[f];
+			const float denom = b[axis] - a[axis];
+			if (math::fabs(denom) < EPS)
+				continue;
+
+			const float t = (faceVals[f] - a[axis]) / denom;
+			if (t < -EPS || t > 1.0f + EPS)
+				continue;
+
+			const float3 hit = a + (b - a) * t;
+
+			// check the other 2 axes are within the face rectangle
+			const int a1 = (axis + 1) % 3;
+			const int a2 = (axis + 2) % 3;
+			if (hit[a1] >= box.mins[a1] - EPS && hit[a1] <= box.maxs[a1] + EPS &&
+			    hit[a2] >= box.mins[a2] - EPS && hit[a2] <= box.maxs[a2] + EPS)
+			{
+				out.push_back(hit);
+			}
+		}
+	}
+
+	// Collect intersection points of segment [a,b] with arbitrary planes, validated by a callback
+	template<typename ValidateFn>
+	void CollectSegmentPlaneHits(const float3& a, const float3& b, const float4* planes, int count, ValidateFn&& validate, std::vector<float3>& out) {
+		const float3 ab = b - a;
+
+		for (int i = 0; i < count; ++i) {
+			const float3 n(planes[i]);
+			const float d = planes[i].w;
+			const float nDotAB = n.dot(ab);
+
+			if (math::fabs(nDotAB) < EPS)
+				continue;
+
+			const float t = -(n.dot(a) + d) / nDotAB;
+			if (t < -EPS || t > 1.0f + EPS)
+				continue;
+
+			const float3 hit = a + ab * t;
+			if (validate(hit))
+				out.push_back(hit);
+		}
+	}
+
+	// Collect intersection points of 4 infinite tube edge lines with the 6 AABB faces
+	void CollectTubeEdgeAABBFaceHits(const AABB& tubeAABB, const CMatrix44f& viewMatrixInv, const AABB& worldBounds, std::vector<float3>& out) {
+		const float3 dir = viewMatrixInv.GetZ(); // light Z-axis in world space
+		const float xCorners[2] = { tubeAABB.mins.x, tubeAABB.maxs.x };
+		const float yCorners[2] = { tubeAABB.mins.y, tubeAABB.maxs.y };
+
+		const float faceVals[6] = { worldBounds.mins.x, worldBounds.maxs.x, worldBounds.mins.y, worldBounds.maxs.y, worldBounds.mins.z, worldBounds.maxs.z };
+		const int   faceAxis[6] = { 0, 0, 1, 1, 2, 2 };
+
+		for (int xi = 0; xi < 2; ++xi) {
+			for (int yi = 0; yi < 2; ++yi) {
+				const float3 origin = viewMatrixInv * float3(xCorners[xi], yCorners[yi], 0.0f);
+
+				for (int f = 0; f < 6; ++f) {
+					const int axis = faceAxis[f];
+					if (math::fabs(dir[axis]) < EPS)
+						continue;
+
+					const float t = (faceVals[f] - origin[axis]) / dir[axis];
+					const float3 hit = origin + dir * t;
+
+					// check the other 2 axes are within the face rectangle
+					const int a1 = (axis + 1) % 3;
+					const int a2 = (axis + 2) % 3;
+					if (hit[a1] >= worldBounds.mins[a1] - EPS && hit[a1] <= worldBounds.maxs[a1] + EPS &&
+					    hit[a2] >= worldBounds.mins[a2] - EPS && hit[a2] <= worldBounds.maxs[a2] + EPS)
+					{
+						out.push_back(hit);
+					}
+				}
+			}
+		}
+	}
+
 	float3 GetLightXDir(const CCamera* playerCam, const float3 toLightDir)
 	{
 #if 0
@@ -818,27 +840,85 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 	// save the player's camera frustum verts in case we need them in CShadowHandler::DrawFrustumDebugMap()
 	playCamFrustum = playerCam->GetFrustum().verts;
 
-	// original world cube
-	Geometry::Polygon worldCube;
-	worldCube.MakeFrom(game->GetWorldBounds());
+	const auto& worldBounds = game->GetWorldBounds();
+	const auto& frustum = playerCam->GetFrustum();
+	const auto aabbCorners = worldBounds.GetCorners();
 
+	// Collect all vertices of the frustum ∩ worldBounds intersection polytope
+	std::vector<float3> polytopeVerts;
+	polytopeVerts.reserve(64);
+
+	// 1) Frustum corners inside AABB
+	for (const auto& v : frustum.verts)
+		if (Impl::AABBContainsEps(worldBounds, v))
+			polytopeVerts.push_back(v);
+
+	const size_t nStep1 = polytopeVerts.size();
+
+	// 2) AABB corners inside frustum
+	for (const auto& c : aabbCorners)
+		if (Impl::PointInsidePlanes(c, frustum.planes.data(), frustum.planes.size()))
+			polytopeVerts.push_back(c);
+
+	const size_t nStep2 = polytopeVerts.size() - nStep1;
+
+	// 3) 12 frustum edges × 6 AABB faces
+	for (const auto& [i, j] : Impl::kFrustumEdges)
+		Impl::CollectSegmentAABBFaceHits(frustum.verts[i], frustum.verts[j], worldBounds, polytopeVerts);
+
+	const size_t nStep3 = polytopeVerts.size() - nStep1 - nStep2;
+
+	// 4) 12 AABB edges × 6 frustum planes
 	{
-		Geometry::Polygon cameraFrustum;
+		auto frustumValidate = [&](const float3& p) {
+			return Impl::AABBContainsEps(worldBounds, p) && Impl::PointInsidePlanes(p, frustum.planes.data(), frustum.planes.size());
+		};
 
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_LFT));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_RGT));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_BOT));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_TOP));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_NEA));
-		cameraFrustum.AddFace().SetPlane(playerCam->GetFrustumPlane(CCamera::FRUSTUM_PLANE_FAR));
-
-		// Clip world bounds to visible frustum to optimize shadow map coverage
-		// Only render shadows for geometry that's actually visible to the player
-		Geometry::Polygon wcClippedByCameraPoly = worldCube.ClipBy(cameraFrustum);
-
-		// Save it explicitly as it's a part of debug output
-		wcClippedByCamera = wcClippedByCameraPoly.GetAllLines();
+		// Debug: log each hit from step 4
+		for (const auto& [i, j] : Impl::kAABBEdges) {
+			const size_t before = polytopeVerts.size();
+			Impl::CollectSegmentPlaneHits(aabbCorners[i], aabbCorners[j], frustum.planes.data(), frustum.planes.size(), frustumValidate, polytopeVerts);
+			if (debugFrustum && polytopeVerts.size() > before) {
+				for (size_t k = before; k < polytopeVerts.size(); ++k) {
+					const auto& h = polytopeVerts[k];
+					// Check which plane each hit is closest to (signed distance ~ 0)
+					for (size_t pi = 0; pi < frustum.planes.size(); ++pi) {
+						const float3 n(frustum.planes[pi]);
+						float sd = n.dot(h) + frustum.planes[pi].w;
+						if (math::fabs(sd) < 0.1f)
+							LOG("  step4 hit (%.3f,%.3f,%.3f) edge[%u,%u] onPlane[%zu] sd=%.8f", h.x, h.y, h.z, i, j, pi, sd);
+					}
+					// Also log distance to each AABB face
+					LOG("  step4 hit AABB margins: xlo=%.6f xhi=%.6f ylo=%.6f yhi=%.6f zlo=%.6f zhi=%.6f",
+						h.x - worldBounds.mins.x, worldBounds.maxs.x - h.x,
+						h.y - worldBounds.mins.y, worldBounds.maxs.y - h.y,
+						h.z - worldBounds.mins.z, worldBounds.maxs.z - h.z);
+				}
+			}
+		}
 	}
+
+	const size_t nStep4 = polytopeVerts.size() - nStep1 - nStep2 - nStep3;
+
+	if (debugFrustum) {
+		LOG("Phase1 steps: frustCorners=%zu aabbCorners=%zu frustEdge×aabbFace=%zu aabbEdge×frustPlane=%zu total=%zu",
+			nStep1, nStep2, nStep3, nStep4, polytopeVerts.size());
+		LOG("  worldBounds mins=(%.6f, %.6f, %.6f) maxs=(%.6f, %.6f, %.6f)",
+			worldBounds.mins.x, worldBounds.mins.y, worldBounds.mins.z,
+			worldBounds.maxs.x, worldBounds.maxs.y, worldBounds.maxs.z);
+		LOG("  frustum near=%.3f far=%.3f", frustum.scales.z, frustum.scales.w);
+		// Log frustum planes at high precision
+		for (size_t pi = 0; pi < frustum.planes.size(); ++pi) {
+			const auto& p = frustum.planes[pi];
+			LOG("  frustPlane[%zu]=(%.10f, %.10f, %.10f, %.10f)", pi, p.x, p.y, p.z, p.w);
+		}
+	}
+
+	debugPhase1Points = polytopeVerts; // for debug drawing
+
+	// Early out: if camera doesn't intersect the map at all, skip shadow rendering
+	if (polytopeVerts.empty())
+		return;
 
 	// construct Camera World Matrix & View Matrix
 	CMatrix44f viewMatrixInv;
@@ -858,11 +938,10 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 		viewMatrix = viewMatrixInv.InvertAffine();
 	}
 
+	// Project polytope vertices to light space
 	lightAABB.Reset();
-
-	for (const auto& p : wcClippedByCamera) {
+	for (const auto& p : polytopeVerts)
 		lightAABB.AddPoint(viewMatrix * p);
-	}
 
 	float3 lsMidPos = lightAABB.CalcCenter();
 	float3 lsDims = lightAABB.CalcScales();
@@ -875,34 +954,66 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 	lightAABB.mins += viewMatrix.GetPos();
 	lightAABB.maxs += viewMatrix.GetPos();
 
-	// wcClippedByCamera/wcClippedByCameraPoly calculated above is worldCube clipped by cameraFrustum
-	// respectively if the camera is e.g. inside the worldcube the clipped volume will become the camera frustum
-	// clipped on the edges of the world, respectively this doesn't guarantee all the remaining world volume
-	// in the direction towards the light source is fit into that tight volume
-	// another case when it is required is when shadow camera position is roughly behind the player's camera
-	// in such cases without adjustment objects behind the near plane of the player's camera
-	// won't be included into the shadow cuboid bounds
-	//
-	// thus, the next step is to clip the worldCube by the near-far extended lightAABB and then transform it to the light space AABB
-	// since l,r,t,b bounds are already defined we only care about the extra height of the light cuboid / AABB (extraShadowCamHeight)
+	// The frustum∩AABB polytope above gives tight XY bounds but may miss geometry behind
+	// the camera's near plane that still casts shadows into the visible area.
+	// Find extraShadowCamHeight by intersecting the worldBounds AABB with the infinite
+	// rectangular "tube" defined by lightAABB's XY extent along the light direction.
 	extraShadowCamHeight = 0.0f;
 	{
-		AABB lightAABBExt = lightAABB;
+		assert(viewMatrix[3] == 0.0f && viewMatrix[7] == 0.0f
+		    && viewMatrix[11] == 0.0f && viewMatrix[15] == 1.0f);
 
-		// extend lightAABBExt.z in both directions so they're guaranteed to extend past the worldCube boundaries 
-		lightAABBExt.maxs.z += 2.0f * readMap->GetBoundingRadius();
-		lightAABBExt.mins.z -= 2.0f * readMap->GetBoundingRadius();
+		// Extract viewMatrix rows (column-major: col[0].x, col[1].x, col[2].x = row 0)
+		const float3 row0(viewMatrix[0], viewMatrix[4], viewMatrix[ 8]);
+		const float3 row1(viewMatrix[1], viewMatrix[5], viewMatrix[ 9]);
+		const float tx = viewMatrix[12], ty = viewMatrix[13];
 
-		Geometry::Polygon unclippedShadowCubePoly;
-		unclippedShadowCubePoly.MakeFrom(lightAABBExt, viewMatrixInv);
-		unclippedShadowCubePoly.FlipFacesDirection(); // figure out why it's needed
+		// 4 world-space half-planes forming the tube:
+		//   (viewMatrix * p).x >= XLmin  ⟺  row0·p + tx >= XLmin  ⟺  row0·p + (tx - XLmin) >= 0
+		const float4 tubePlanes[4] = {
+			float4( row0,  tx - lightAABB.mins.x),  // x >= mins.x
+			float4(-row0, -tx + lightAABB.maxs.x),  // x <= maxs.x
+			float4( row1,  ty - lightAABB.mins.y),  // y >= mins.y
+			float4(-row1, -ty + lightAABB.maxs.y),  // y <= maxs.y
+		};
 
-		Geometry::Polygon wcClippedByShCubePoly = worldCube.ClipBy(unclippedShadowCubePoly);
-		wcClippedByShCube = wcClippedByShCubePoly.GetAllLines();
+		auto tubeValidate = [&](const float3& p) {
+			return Impl::AABBContainsEps(worldBounds, p) && Impl::PointInsidePlanes(p, tubePlanes, 4);
+		};
 
-		// reuse lightAABBExt variable
-		lightAABBExt = wcClippedByShCubePoly.GetAABB(viewMatrix);
-		extraShadowCamHeight = std::max(extraShadowCamHeight, lightAABBExt.maxs.z);
+		std::vector<float3> tubeVerts;
+		tubeVerts.reserve(32);
+
+		// 1) AABB corners inside tube
+		for (const auto& c : aabbCorners)
+			if (Impl::PointInsidePlanes(c, tubePlanes, 4))
+				tubeVerts.push_back(c);
+
+		// 2) 12 AABB edges × 4 tube planes
+		for (const auto& [i, j] : Impl::kAABBEdges)
+			Impl::CollectSegmentPlaneHits(aabbCorners[i], aabbCorners[j], tubePlanes, 4, tubeValidate, tubeVerts);
+
+		// 3) 4 tube edge lines × 6 AABB faces
+		Impl::CollectTubeEdgeAABBFaceHits(lightAABB, viewMatrixInv, worldBounds, tubeVerts);
+
+		// Find max light-space Z among collected vertices
+		// (maxZ is correct: camera at Z=0 looking down -Z, positive Z = behind camera toward light)
+		float maxZ = std::numeric_limits<float>::lowest();
+		for (const auto& v : tubeVerts)
+			maxZ = std::max(maxZ, (viewMatrix * v).z);
+
+		if (maxZ > 0.0f)
+			extraShadowCamHeight = maxZ;
+
+		if (debugFrustum) {
+			LOG("Phase1: %zu verts, lightAABB X[%.1f, %.1f] Y[%.1f, %.1f] Z[%.1f, %.1f]",
+				polytopeVerts.size(),
+				lightAABB.mins.x, lightAABB.maxs.x,
+				lightAABB.mins.y, lightAABB.maxs.y,
+				lightAABB.mins.z, lightAABB.maxs.z);
+			LOG("Phase2: %zu tubeVerts, maxZ=%.3f, extraShadowCamHeight=%.3f",
+				tubeVerts.size(), maxZ, extraShadowCamHeight);
+		}
 	}
 
 	// shift camera further away to account for the calculation above

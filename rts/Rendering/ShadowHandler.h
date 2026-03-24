@@ -6,6 +6,7 @@
 #include <array>
 #include <limits>
 #include <tuple>
+#include <vector>
 
 #include "Rendering/GL/FBO.h"
 #include "System/float4.h"
@@ -113,9 +114,8 @@ private:
 	inline static bool firstInit = true;
 	inline static bool shadowsSupported = false;
 
-	std::vector<float3> wcClippedByCamera;
-	std::vector<float3> wcClippedByShCube;
 	float extraShadowCamHeight;
+	std::vector<float3> debugPhase1Points;
 	std::array<float3, 8> playCamFrustum;
 
 	// these project geometry into light-space
