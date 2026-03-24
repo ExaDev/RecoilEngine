@@ -649,7 +649,6 @@ void CShadowHandler::DrawShadowPasses()
 
 	{
 		auto polyOffset = GL::SubState(
-			CullFace(GL_FRONT),
 			PolygonOffset(mapPolygonOffsetScale, mapPolygonOffsetUnits) // factor * DZ + r * units
 		);
 
@@ -874,7 +873,7 @@ void CShadowHandler::CalcShadowMatrices(CCamera* playerCam, CCamera* shadowCam)
 
 		// Clip worldBounds faces by the shadow caster bounds planes (face-by-face S-H)
 		std::vector<float3> shadowCasterVerts;
-		tubeVerts.reserve(32);
+		shadowCasterVerts.reserve(32);
 
 		const auto wbCorners = worldBounds.GetCorners();
 		Impl::ClipAABBFacesByPlanes(wbCorners, shadowCasterBoundsPlanes, 4, shadowCasterVerts);
