@@ -53,7 +53,7 @@ else()
 	message(STATUS "${Spring_BINARY_DIR}/springsettings.cfg already exists!")
 endif()
 
-### Install dependencies (windows, mingwlibs DLLs)
+### Install dependencies (windows, RecoilEngineLibs DLLs)
 if    (MINGW)
 	if(EXISTS ${MINGWLIBS}/dll/)
 		install (DIRECTORY ${MINGWLIBS}/dll/ DESTINATION ${BINDIR} PATTERN "*.dll")
