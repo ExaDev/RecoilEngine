@@ -1077,6 +1077,13 @@ bool CLuaUnitScript::PushEntries(lua_State* L)
 
 	REGISTER_LUA_CFUNC(GetActiveUnitID);
 
+	REGISTER_LUA_CFUNC(PlayAnimation);
+	REGISTER_LUA_CFUNC(StopAnimation);
+	REGISTER_LUA_CFUNC(SetAnimationSpeed);
+	REGISTER_LUA_CFUNC(SetAnimationTime);
+	REGISTER_LUA_CFUNC(GetAnimationTime);
+	REGISTER_LUA_CFUNC(GetAnimationDuration);
+
 	lua_rawset(L, -3);
 
 	// backwards compatibility
@@ -1521,6 +1528,75 @@ int CLuaUnitScript::Scale(lua_State* L)
 	}
 
 	return 0;
+}
+
+
+int CLuaUnitScript::PlayAnimation(lua_State* L)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (activeScript == nullptr)
+		return 0;
+
+	const std::string name = luaL_checkstring(L, 1);
+	const float speed = luaL_optfloat(L, 2, 1.0f);
+	const bool  loop  = lua_isnoneornil(L, 3) || lua_toboolean(L, 3);
+	activeScript->PlayEmbeddedAnimation(name, speed, loop);
+	return 0;
+}
+
+
+int CLuaUnitScript::StopAnimation(lua_State* L)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (activeScript == nullptr)
+		return 0;
+
+	activeScript->StopEmbeddedAnimation();
+	return 0;
+}
+
+
+int CLuaUnitScript::SetAnimationSpeed(lua_State* L)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (activeScript == nullptr)
+		return 0;
+
+	activeScript->SetEmbeddedAnimSpeed(luaL_checkfloat(L, 1));
+	return 0;
+}
+
+
+int CLuaUnitScript::SetAnimationTime(lua_State* L)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (activeScript == nullptr)
+		return 0;
+
+	activeScript->SetEmbeddedAnimTime(luaL_checkfloat(L, 1));
+	return 0;
+}
+
+
+int CLuaUnitScript::GetAnimationTime(lua_State* L)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (activeScript == nullptr)
+		return 0;
+
+	lua_pushnumber(L, activeScript->GetEmbeddedAnimTime());
+	return 1;
+}
+
+
+int CLuaUnitScript::GetAnimationDuration(lua_State* L)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (activeScript == nullptr)
+		return 0;
+
+	lua_pushnumber(L, activeScript->GetEmbeddedAnimDuration());
+	return 1;
 }
 
 

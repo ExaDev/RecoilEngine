@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <tuple>
@@ -59,7 +60,22 @@ namespace ModelAnimation {
 		}
 
 		void RemoveEmptyAnimations();
+
+		bool HasAnimation(const std::string& name) const {
+			return animationMap.find(name) != animationMap.end();
+		}
+
+		// Returns the duration (seconds) of the named animation, or 0.0 if not found.
+		float GetAnimationDuration(const std::string& name) const;
+
+		MapType::const_iterator cend() const { return animationMap.cend(); }
 	private:
 		MapType animationMap;
 	};
+
+	// Sample a keyframe sequence at the given time using linear interpolation (SLERP for quaternions).
+	// Returns the default value for the type if the sequence is empty.
+	// Time is clamped to [first, last] keyframe (no looping — caller handles that).
+	template<typename T>
+	T SampleSequence(const TypedSequence<T>& seq, float time);
 }

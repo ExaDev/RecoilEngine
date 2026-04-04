@@ -11,6 +11,7 @@
 
 #include "Rendering/Models/LocalModelPiece.hpp"
 #include "System/creg/creg_cond.h"
+#include "Rendering/Models/3DModelAnimation.hpp"
 
 
 class CUnit;
@@ -53,6 +54,16 @@ protected:
 
 	AnimContainerType anims;
 	AnimContainerType doneAnims;
+
+	struct EmbeddedAnimPlayer {
+		CR_DECLARE_STRUCT(EmbeddedAnimPlayer)
+		std::string animName;
+		float currentTime = 0.0f;
+		float playSpeed   = 1.0f;
+		float duration    = 0.0f;
+		bool  isPlaying   = false;
+		bool  isLooping   = true;
+	} embeddedAnim;
 
 	bool busy;
 	bool hasSetSFXOccupy;
@@ -124,6 +135,16 @@ public:
 	bool TickTurnAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai);
 	bool TickSpinAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai);
 	bool TickScaleAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai);
+	void TickEmbeddedAnim(int tickRate);
+
+	// animation, used by Lua unit scripts
+	void PlayEmbeddedAnimation(const std::string& name, float speed, bool loop);
+	void StopEmbeddedAnimation();
+
+	void  SetEmbeddedAnimSpeed(float speed) { embeddedAnim.playSpeed = speed; }
+	void  SetEmbeddedAnimTime(float time)   { embeddedAnim.currentTime = time; }
+	float GetEmbeddedAnimTime()  const      { return embeddedAnim.currentTime; }
+	float GetEmbeddedAnimDuration() const   { return embeddedAnim.duration; }
 
 	// animation, used by CCobThread
 	void Spin(int piece, int axis, float speed, float accel);
@@ -156,7 +177,7 @@ public:
 		return (FindAnim(type, piece, axis) != anims.end());
 	}
 	bool HaveAnimations() const {
-		return (!anims.empty());
+		return (!anims.empty() || embeddedAnim.isPlaying);
 	}
 
 	// checks for callin existence

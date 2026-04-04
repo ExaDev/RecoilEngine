@@ -194,6 +194,14 @@ private:
 	static int GetPiecePosDir(lua_State* L);      // EmitDirPos (in unit space)
 
 	static int GetActiveUnitID(lua_State* L);
+
+	// Embedded animation playback
+	static int PlayAnimation(lua_State* L);
+	static int StopAnimation(lua_State* L);
+	static int SetAnimationSpeed(lua_State* L);
+	static int SetAnimationTime(lua_State* L);
+	static int GetAnimationTime(lua_State* L);
+	static int GetAnimationDuration(lua_State* L);
 };
 
 #endif

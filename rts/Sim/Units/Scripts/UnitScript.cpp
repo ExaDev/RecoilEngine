@@ -41,6 +41,7 @@
 #include "Sim/Weapons/PlasmaRepulser.h"
 #include "Sim/Weapons/Weapon.h"
 #include "Sim/Weapons/WeaponDef.h"
+#include "Rendering/Models/3DModel.h"
 #include "Rendering/Models/3DModel.hpp"
 #include "Rendering/Models/3DModelPiece.hpp"
 #include "System/FastMath.h"
@@ -61,6 +62,7 @@ CR_REG_METADATA(CUnitScript, (
 	CR_MEMBER(busy),
 	CR_MEMBER(anims),
 	CR_MEMBER(doneAnims),
+	CR_MEMBER(embeddedAnim),
 
 	//Populated by children
 	CR_IGNORED(rootPiece),
@@ -68,6 +70,17 @@ CR_REG_METADATA(CUnitScript, (
 	CR_IGNORED(hasSetSFXOccupy),
 	CR_IGNORED(hasRockUnit),
 	CR_IGNORED(hasStartBuilding)
+))
+
+CR_BIND(CUnitScript::EmbeddedAnimPlayer,)
+
+CR_REG_METADATA_SUB(CUnitScript, EmbeddedAnimPlayer, (
+	CR_MEMBER(animName),
+	CR_MEMBER(currentTime),
+	CR_MEMBER(playSpeed),
+	CR_MEMBER(duration),
+	CR_MEMBER(isPlaying),
+	CR_MEMBER(isLooping)
 ))
 
 CR_BIND(CUnitScript::AnimInfo,)
@@ -199,6 +212,9 @@ bool CUnitScript::DoSpin(float& cur, float dest, float& speed, float accel, int 
 void CUnitScript::TickAllAnims(int deltaTime)
 {
 	ZoneScoped;
+
+	// Apply embedded animation first — script anims will overwrite their claimed channels below.
+	TickEmbeddedAnim(1000 / deltaTime);
 
 	// optimize the memory access patterns of the procedure below
 	std::sort(anims.begin(), anims.end(), [](const auto& lhs, const auto& rhs) {
@@ -339,6 +355,111 @@ bool CUnitScript::TickScaleAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai
 
 	return ret;
 }
+
+
+void CUnitScript::TickEmbeddedAnim(int tickRate)
+{
+	if (!embeddedAnim.isPlaying)
+		return;
+	if (pieces.empty())
+		return;
+
+	// Advance time
+	if (embeddedAnim.duration > 0.0f) {
+		embeddedAnim.currentTime += embeddedAnim.playSpeed / tickRate;
+		if (embeddedAnim.isLooping)
+			embeddedAnim.currentTime = std::fmod(embeddedAnim.currentTime, embeddedAnim.duration);
+		else
+			embeddedAnim.currentTime = std::min(embeddedAnim.currentTime, embeddedAnim.duration);
+	}
+
+	const S3DModel* model = pieces[0]->original->GetParentModel();
+	// GetPieceAnimationVectors handles the not-found case (returns nullptr), so no early-out needed.
+	auto animIt = model->animationMap.GetNamedAnimationIterator(embeddedAnim.animName);
+
+	const float t = embeddedAnim.currentTime;
+
+	for (int si = 0, n = static_cast<int>(pieces.size()); si < n; si++) {
+		LocalModelPiece* lmp = pieces[si];
+		if (!lmp)
+			continue;
+
+		const size_t pieceIdx = static_cast<size_t>(lmp->GetLModelPieceIndex());
+
+		// --- Translation (per-axis, only unclaimed by Move) ---
+		if (const auto* seq = model->animationMap.GetPieceAnimationVectors<float3>(animIt, pieceIdx)) {
+			if (!seq->timeFrames.empty()) {
+				const float3 p = ModelAnimation::SampleSequence(*seq, t);
+				float3 cur = lmp->GetPosition();
+				for (int ax = 0; ax < 3; ax++) {
+					if (FindAnim(AMove, si, ax) == anims.end())
+						cur[ax] = p[ax];
+				}
+				lmp->SetPosition(cur);
+			}
+		}
+
+		// --- Rotation (per-axis, only unclaimed by Turn/Spin) ---
+		if (const auto* seq = model->animationMap.GetPieceAnimationVectors<CQuaternion>(animIt, pieceIdx)) {
+			if (!seq->timeFrames.empty()) {
+				const CQuaternion qAnim = ModelAnimation::SampleSequence(*seq, t);
+
+				// ComposeTransform applies: bakedTransform.r * FromEulerYPR(rot)
+				// So: FromEulerYPR(rot) = bakedTransform.r.Inverse() * qAnim
+				const CQuaternion qBaked = lmp->original->HasBackedTra()
+					? lmp->original->bakedTransform->r
+					: CQuaternion{};
+				const float3 embRot = (qBaked.Inverse() * qAnim).ToEulerYPR();
+
+				float3 cur = lmp->GetRotation();
+				for (int ax = 0; ax < 3; ax++) {
+					if (FindAnim(ATurn, si, ax) == anims.end() && FindAnim(ASpin, si, ax) == anims.end())
+						cur[ax] = embRot[ax];
+				}
+				lmp->SetRotation(cur);
+			}
+		}
+
+		// --- Scale (whole piece, only if unclaimed by Scale) ---
+		if (const auto* seq = model->animationMap.GetPieceAnimationVectors<float>(animIt, pieceIdx)) {
+			if (!seq->timeFrames.empty()) {
+				const float s = ModelAnimation::SampleSequence(*seq, t);
+				if (FindAnim(AScale, si, -1) == anims.end())
+					lmp->SetScaling(s);
+			}
+		}
+	}
+}
+
+
+void CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed, bool loop)
+{
+	if (pieces.empty())
+		return;
+
+	const S3DModel* model = pieces[0]->original->GetParentModel();
+	if (!model->animationMap.HasAnimation(name)) {
+		ShowUnitScriptError("PlayAnimation: animation '" + name + "' not found");
+		return;
+	}
+
+	embeddedAnim.animName    = name;
+	embeddedAnim.playSpeed   = speed;
+	embeddedAnim.isLooping   = loop;
+	embeddedAnim.duration    = model->animationMap.GetAnimationDuration(name);
+	embeddedAnim.currentTime = 0.0f;
+	embeddedAnim.isPlaying   = true;
+
+	unitScriptEngine->AddInstance(this);
+}
+
+
+void CUnitScript::StopEmbeddedAnimation()
+{
+	embeddedAnim.isPlaying = false;
+	// If no script anims are running either, unitScriptEngine will remove us next tick.
+}
+
 
 CUnitScript::AnimContainerTypeIt CUnitScript::FindAnim(AnimType type, int piece, int axis)
 {
