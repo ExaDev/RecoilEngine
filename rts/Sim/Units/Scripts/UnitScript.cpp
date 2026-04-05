@@ -61,7 +61,7 @@ CR_REG_METADATA(CUnitScript, (
 	CR_MEMBER(busy),
 	CR_MEMBER(anims),
 	CR_MEMBER(doneAnims),
-	CR_MEMBER(embeddedAnim),
+	CR_MEMBER(embeddedAnims),
 
 	//Populated by children
 	CR_IGNORED(rootPiece),
@@ -78,6 +78,7 @@ CR_REG_METADATA_SUB(CUnitScript, EmbeddedAnimPlayer, (
 	CR_MEMBER(currentTime),
 	CR_MEMBER(playSpeed),
 	CR_MEMBER(duration),
+	CR_MEMBER(weight),
 	CR_MEMBER(isPlaying),
 	CR_MEMBER(isLooping)
 ))
@@ -231,7 +232,7 @@ void CUnitScript::TickAllAnims(int deltaTime)
 	for (auto& ai : anims) {
 		LocalModelPiece& lmp = *pieces[ai.piece];
 		const auto& currFunc = TICK_ANIM_FUNCS[ai.animType];
-		if (ai.done |= std::invoke(currFunc, this, tickRate, lmp, ai)) {
+		if ((ai.done |= std::invoke(currFunc, this, tickRate, lmp, ai))) {
 			if (ai.hasWaiting)
 				doneAnims.emplace_back(ai);
 		}
@@ -315,68 +316,117 @@ bool CUnitScript::TickAnimFinished()
 
 bool CUnitScript::TickMoveAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai)
 {
-	float3 pos = lmp.GetPosition();
-	const bool ret = MoveToward(pos[ai.axis], ai.dest, ai.speed / tickRate);
-	lmp.SetPosition(pos);
-	lmp.SetPositionNoInterpolation(false);
+	float3 cur = lmp.GetPosition();
+	float val = cur[ai.axis];
 
-	return ret;
+	float dest = ai.dest;
+	if (math::isnan(dest)) {
+		if (ai.piece >= 0 && ai.piece < static_cast<int>(embeddedPieceStates.size()))
+			dest = embeddedPieceStates[ai.piece].pos[ai.axis];
+		else
+			dest = lmp.original->offset[ai.axis];
+	}
+
+	const bool b = MoveToward(val, dest, ai.speed / tickRate);
+	cur[ai.axis] = val;
+	lmp.SetPosition(cur);
+	lmp.SetPositionNoInterpolation(false);
+	return b;
 }
 
 bool CUnitScript::TickTurnAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai)
 {
-	float3 rot = lmp.GetRotation();
-	rot[ai.axis] = ClampRad(rot[ai.axis]);
-	const bool ret = TurnToward(rot[ai.axis], ai.dest, ai.speed / tickRate);
-	lmp.SetRotation(rot);
-	lmp.SetRotationNoInterpolation(false);
+	float3 cur = lmp.GetRotation();
+	float val = cur[ai.axis];
 
-	return ret;
+	float dest = ai.dest;
+	if (math::isnan(dest)) {
+		if (ai.piece >= 0 && ai.piece < static_cast<int>(embeddedPieceStates.size()))
+			dest = embeddedPieceStates[ai.piece].rot[ai.axis];
+		else
+			dest = 0.0f;
+	}
+
+	const bool b = TurnToward(val, dest, ai.speed / tickRate);
+	cur[ai.axis] = val;
+	lmp.SetRotation(cur);
+	lmp.SetRotationNoInterpolation(false);
+	return b;
 }
 
 bool CUnitScript::TickSpinAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai)
 {
-	float3 rot = lmp.GetRotation();
-	rot[ai.axis] = ClampRad(rot[ai.axis]);
-	const bool ret = DoSpin(rot[ai.axis], ai.dest, ai.speed, ai.accel, tickRate);
-	lmp.SetRotation(rot);
-	lmp.SetRotationNoInterpolation(false);
+	float3 cur = lmp.GetRotation();
+	float val = cur[ai.axis];
 
-	return ret;
+	const bool b = DoSpin(val, ai.dest, ai.speed, ai.accel, tickRate);
+	cur[ai.axis] = val;
+	lmp.SetRotation(cur);
+	lmp.SetRotationNoInterpolation(false);
+	return b;
 }
 
 bool CUnitScript::TickScaleAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai)
 {
-	auto scale = lmp.GetScaling();
-	const bool ret = ScaleToward(scale, ai.dest, ai.speed / tickRate);
-	lmp.SetScaling(scale);
+	float cur = lmp.GetScaling();
+
+	float dest = ai.dest;
+	if (math::isnan(dest)) {
+		if (ai.piece >= 0 && ai.piece < static_cast<int>(embeddedPieceStates.size()))
+			dest = embeddedPieceStates[ai.piece].scale;
+		else
+			dest = lmp.original->scale;
+	}
+
+	const bool b = ScaleToward(cur, dest, ai.speed / tickRate);
+	lmp.SetScaling(cur);
 	lmp.SetScalingNoInterpolation(false);
-
-	return ret;
+	return b;
 }
-
 
 void CUnitScript::TickEmbeddedAnim(int tickRate)
 {
-	if (!embeddedAnim.isPlaying)
-		return;
-	if (pieces.empty())
+	if (pieces.empty() || embeddedAnims.empty())
 		return;
 
-	// Advance time
-	if (embeddedAnim.duration > 0.0f) {
-		embeddedAnim.currentTime += embeddedAnim.playSpeed / tickRate;
-		if (embeddedAnim.isLooping)
-			embeddedAnim.currentTime = std::fmod(embeddedAnim.currentTime, embeddedAnim.duration);
-		else
-			embeddedAnim.currentTime = std::min(embeddedAnim.currentTime, embeddedAnim.duration);
+	const auto* model = unit->model;
+
+	struct ActiveAnim {
+		float time;
+		float weight;
+		ModelAnimation::MapType::const_iterator animIt;
+	};
+
+	std::vector<ActiveAnim> activeAnims;
+	activeAnims.reserve(embeddedAnims.size());
+
+	bool anyPlaying = false;
+	for (auto& anim : embeddedAnims) {
+		if (!anim.isPlaying)
+			continue;
+
+		anyPlaying = true;
+
+		if (anim.duration > 0.0f) {
+			anim.currentTime += anim.playSpeed / tickRate;
+			if (anim.isLooping)
+				anim.currentTime = std::fmod(anim.currentTime, anim.duration);
+			else
+				anim.currentTime = std::min(anim.currentTime, anim.duration);
+		}
+
+		if (anim.weight > 0.0f) {
+			auto animIt = model->animationMap.GetNamedAnimationIterator(anim.animName);
+			if (animIt != model->animationMap.cend())
+				activeAnims.push_back({anim.currentTime, anim.weight, animIt});
+		}
 	}
 
-	const S3DModel* model = pieces[0]->original->GetParentModel();
-	// GetPieceAnimationVectors handles the not-found case (returns nullptr), so no early-out needed.
-	auto animIt = model->animationMap.GetNamedAnimationIterator(embeddedAnim.animName);
+	if (!anyPlaying)
+		return;
 
-	const float t = embeddedAnim.currentTime;
+	if (embeddedPieceStates.size() != pieces.size())
+		embeddedPieceStates.resize(pieces.size());
 
 	for (int si = 0, n = static_cast<int>(pieces.size()); si < n; si++) {
 		LocalModelPiece* lmp = pieces[si];
@@ -385,81 +435,204 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 
 		const size_t pieceIdx = static_cast<size_t>(lmp->GetLModelPieceIndex());
 
-		// --- Translation (per-axis, only unclaimed by Move) ---
-		if (const auto* seq = model->animationMap.GetPieceAnimationVectors<float3>(animIt, pieceIdx)) {
-			if (!seq->timeFrames.empty()) {
-				const float3 p = ModelAnimation::SampleSequence(*seq, t);
-				float3 cur = lmp->GetPosition();
-				for (int ax = 0; ax < 3; ax++) {
-					if (FindAnim(AMove, si, ax) == anims.end())
-						cur[ax] = p[ax];
+		float3 posAccum   = ZeroVector;
+		float4 rotAccum(0.0f, 0.0f, 0.0f, 0.0f);
+		float  scaleAccum = 0.0f;
+
+		float sumPosWeight   = 0.0f;
+		float sumRotWeight   = 0.0f;
+		float sumScaleWeight = 0.0f;
+
+		for (const auto& aa : activeAnims) {
+			if (const auto* seq = model->animationMap.GetPieceAnimationVectors<float3>(aa.animIt, pieceIdx)) {
+				if (!seq->timeFrames.empty()) {
+					posAccum += ModelAnimation::SampleSequence(*seq, aa.time) * aa.weight;
+					sumPosWeight += aa.weight;
 				}
-				lmp->SetPosition(cur);
+			}
+
+			if (const auto* seq = model->animationMap.GetPieceAnimationVectors<CQuaternion>(aa.animIt, pieceIdx)) {
+				if (!seq->timeFrames.empty()) {
+					CQuaternion qAnim = ModelAnimation::SampleSequence(*seq, aa.time);
+					if (sumRotWeight > 0.0f) {
+						if (rotAccum.x * qAnim.x + rotAccum.y * qAnim.y + rotAccum.z * qAnim.z + rotAccum.w * qAnim.r < 0.0f) {
+							qAnim.x = -qAnim.x;
+							qAnim.y = -qAnim.y;
+							qAnim.z = -qAnim.z;
+							qAnim.r = -qAnim.r;
+						}
+					}
+					rotAccum.x += qAnim.x * aa.weight;
+					rotAccum.y += qAnim.y * aa.weight;
+					rotAccum.z += qAnim.z * aa.weight;
+					rotAccum.w += qAnim.r * aa.weight;
+					sumRotWeight += aa.weight;
+				}
+			}
+
+			if (const auto* seq = model->animationMap.GetPieceAnimationVectors<float>(aa.animIt, pieceIdx)) {
+				if (!seq->timeFrames.empty()) {
+					scaleAccum += ModelAnimation::SampleSequence(*seq, aa.time) * aa.weight;
+					sumScaleWeight += aa.weight;
+				}
 			}
 		}
 
-		// --- Rotation (per-axis, only unclaimed by Turn/Spin) ---
-		if (const auto* seq = model->animationMap.GetPieceAnimationVectors<CQuaternion>(animIt, pieceIdx)) {
-			if (!seq->timeFrames.empty()) {
-				const CQuaternion qAnim = ModelAnimation::SampleSequence(*seq, t);
-
-				// ComposeTransform applies: bakedTransform.r * FromEulerYPR(rot)
-				// So: FromEulerYPR(rot) = bakedTransform.r.Inverse() * qAnim
-				const CQuaternion qBaked = lmp->original->HasBackedTra()
-					? lmp->original->bakedTransform->r
-					: CQuaternion{};
-				const float3 embRot = (qBaked.Inverse() * qAnim).ToEulerYPR();
-
-				float3 cur = lmp->GetRotation();
-				for (int ax = 0; ax < 3; ax++) {
-					if (FindAnim(ATurn, si, ax) == anims.end() && FindAnim(ASpin, si, ax) == anims.end())
-						cur[ax] = embRot[ax];
-				}
-				lmp->SetRotation(cur);
+		if (sumPosWeight > 0.0f) {
+			float3 bindPos = lmp->original->offset;
+			if (sumPosWeight < 1.0f)
+				posAccum += bindPos * (1.0f - sumPosWeight);
+			else
+				posAccum /= sumPosWeight;
+			embeddedPieceStates[si].pos = posAccum;
+			float3 cur = lmp->GetPosition();
+			for (int ax = 0; ax < 3; ax++) {
+				if (FindAnim(AMove, si, ax) == anims.end())
+					cur[ax] = posAccum[ax];
 			}
+			lmp->SetPosition(cur);
+		} else {
+			embeddedPieceStates[si].pos = lmp->original->offset;
 		}
 
-		// --- Scale (whole piece, only if unclaimed by Scale) ---
-		if (const auto* seq = model->animationMap.GetPieceAnimationVectors<float>(animIt, pieceIdx)) {
-			if (!seq->timeFrames.empty()) {
-				const float s = ModelAnimation::SampleSequence(*seq, t);
-				if (FindAnim(AScale, si, -1) == anims.end())
-					lmp->SetScaling(s);
+		if (sumRotWeight > 0.0f) {
+			if (sumRotWeight < 1.0f)
+				rotAccum.w += (1.0f - sumRotWeight); // bind pose is identity (0,0,0,1)
+			CQuaternion finalQ(rotAccum.x, rotAccum.y, rotAccum.z, rotAccum.w);
+			finalQ.Normalize();
+
+			const CQuaternion qBaked = lmp->original->HasBackedTra()
+				? lmp->original->bakedTransform->r
+				: CQuaternion{};
+			const float3 embRot = (qBaked.Inverse() * finalQ).ToEulerYPR();
+			embeddedPieceStates[si].rot = embRot;
+			float3 cur = lmp->GetRotation();
+			for (int ax = 0; ax < 3; ax++) {
+				if (FindAnim(ATurn, si, ax) == anims.end() && FindAnim(ASpin, si, ax) == anims.end())
+					cur[ax] = embRot[ax];
 			}
+			lmp->SetRotation(cur);
+		} else {
+			embeddedPieceStates[si].rot = ZeroVector;
+		}
+
+		if (sumScaleWeight > 0.0f) {
+			float bindScale = lmp->original->scale;
+			if (sumScaleWeight < 1.0f)
+				scaleAccum += bindScale * (1.0f - sumScaleWeight);
+			else
+				scaleAccum /= sumScaleWeight;
+			embeddedPieceStates[si].scale = scaleAccum;
+			if (FindAnim(AScale, si, -1) == anims.end())
+				lmp->SetScaling(scaleAccum);
+		} else {
+			embeddedPieceStates[si].scale = lmp->original->scale;
 		}
 	}
 }
 
-
-void CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed, bool loop)
+uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string &name, float speed, bool loop, float weight)
 {
 	if (pieces.empty())
-		return;
+		return static_cast<uint32_t>(-1);
 
-	const S3DModel* model = pieces[0]->original->GetParentModel();
+	const auto* model = unit->model;
 
 	if (!model->animationMap.HasAnimation(name)) {
 		ShowUnitScriptError("PlayAnimation: animation '" + name + "' not found");
-		return;
+		return static_cast<uint32_t>(-1);
 	}
 
-	embeddedAnim.animName    = name;
-	embeddedAnim.playSpeed   = speed;
-	embeddedAnim.isLooping   = loop;
-	embeddedAnim.duration    = model->animationMap.GetAnimationDuration(name);
-	embeddedAnim.currentTime = 0.0f;
-	embeddedAnim.isPlaying   = true;
+	EmbeddedAnimPlayer anim;
+	anim.animName    = name;
+	anim.playSpeed   = speed;
+	anim.isLooping   = loop;
+	anim.weight      = weight;
+	anim.duration    = model->animationMap.GetAnimationDuration(name);
+	anim.currentTime = 0.0f;
+	anim.isPlaying   = true;
 
+	const uint32_t id = embeddedAnims.Add(anim);
 	unitScriptEngine->AddInstance(this);
+	return id;
 }
 
-
-void CUnitScript::StopEmbeddedAnimation()
+void CUnitScript::StopEmbeddedAnimation(uint32_t id)
 {
-	embeddedAnim.isPlaying = false;
-	// If no script anims are running either, unitScriptEngine will remove us next tick.
+	if (id < embeddedAnims.size() && embeddedAnims[id].isPlaying)
+		embeddedAnims.Del(id);
 }
 
+void CUnitScript::StopEmbeddedAnimationByString(const std::string &name)
+{
+	for (uint32_t i = 0; i < embeddedAnims.size(); ++i) {
+		if (embeddedAnims[i].isPlaying && embeddedAnims[i].animName == name)
+			embeddedAnims.Del(i);
+	}
+}
+
+void CUnitScript::StopEmbeddedAnimations()
+{
+	embeddedAnims.clear();
+}
+
+void CUnitScript::SetEmbeddedAnimSpeed(uint32_t id, float speed)
+{
+	if (id < embeddedAnims.size() && embeddedAnims[id].isPlaying)
+		embeddedAnims[id].playSpeed = speed;
+}
+
+void CUnitScript::SetEmbeddedAnimTime(uint32_t id, float time)
+{
+	if (id < embeddedAnims.size() && embeddedAnims[id].isPlaying)
+		embeddedAnims[id].currentTime = time;
+}
+
+void CUnitScript::SetEmbeddedAnimWeight(uint32_t id, float weight)
+{
+	if (id < embeddedAnims.size() && embeddedAnims[id].isPlaying)
+		embeddedAnims[id].weight = weight;
+}
+
+float CUnitScript::GetEmbeddedAnimTime(uint32_t id) const
+{
+	if (id < embeddedAnims.size() && embeddedAnims[id].isPlaying)
+		return embeddedAnims[id].currentTime;
+	return 0.0f;
+}
+
+float CUnitScript::GetEmbeddedAnimDuration(const std::string &name) const
+{
+	if (pieces.empty())
+		return 0.0f;
+
+	const auto* model = unit->model;
+	return model->animationMap.GetAnimationDuration(name);
+}
+
+bool CUnitScript::IsEmbeddedAnimPlaying(const std::string &name) const
+{
+	for (const auto& anim : embeddedAnims.GetData()) {
+		if (anim.isPlaying && anim.animName == name)
+			return true;
+	}
+	return false;
+}
+
+void CUnitScript::RestorePieceTurn(int piece, int axis, float speed)
+{
+	Turn(piece, axis, speed, std::numeric_limits<float>::quiet_NaN());
+}
+
+void CUnitScript::RestorePieceMove(int piece, int axis, float speed)
+{
+	Move(piece, axis, speed, std::numeric_limits<float>::quiet_NaN());
+}
+
+void CUnitScript::RestorePieceScale(int piece, float speed)
+{
+	Scale(piece, speed, std::numeric_limits<float>::quiet_NaN());
+}
 
 CUnitScript::AnimContainerTypeIt CUnitScript::FindAnim(AnimType type, int piece, int axis)
 {

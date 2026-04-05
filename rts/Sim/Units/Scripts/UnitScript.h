@@ -11,6 +11,7 @@
 
 #include "Rendering/Models/LocalModelPiece.hpp"
 #include "System/creg/creg_cond.h"
+#include "System/FreeListMap.h"
 #include "Rendering/Models/3DModelAnimation.hpp"
 
 
@@ -55,15 +56,24 @@ protected:
 	AnimContainerType anims;
 	AnimContainerType doneAnims;
 
+	struct EmbeddedPieceState {
+		float3 pos;
+		float3 rot;
+		float scale;
+	};
+	std::vector<EmbeddedPieceState> embeddedPieceStates;
+
 	struct EmbeddedAnimPlayer {
 		CR_DECLARE_STRUCT(EmbeddedAnimPlayer)
 		std::string animName;
 		float currentTime = 0.0f;
 		float playSpeed   = 1.0f;
 		float duration    = 0.0f;
+		float weight      = 1.0f;
 		bool  isPlaying   = false;
 		bool  isLooping   = true;
-	} embeddedAnim;
+	};
+	spring::FreeListMap<EmbeddedAnimPlayer> embeddedAnims;
 
 	bool busy;
 	bool hasSetSFXOccupy;
@@ -135,18 +145,27 @@ public:
 	bool TickTurnAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai);
 	bool TickSpinAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai);
 	bool TickScaleAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai);
+	bool TickRestoreAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai);
 	void TickEmbeddedAnim(int tickRate);
 
 	// animation, used by Lua unit scripts
-	void PlayEmbeddedAnimation(const std::string& name, float speed, bool loop);
-	void StopEmbeddedAnimation();
+	unsigned int PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight);
+	void StopEmbeddedAnimation(unsigned int id);
+	void StopEmbeddedAnimationByString(const std::string& name);
+	void StopEmbeddedAnimations();
 
-	void  SetEmbeddedAnimSpeed(float speed) { embeddedAnim.playSpeed = speed; }
-	void  SetEmbeddedAnimTime(float time)   { embeddedAnim.currentTime = time; }
-	float GetEmbeddedAnimTime()  const      { return embeddedAnim.currentTime; }
-	float GetEmbeddedAnimDuration() const   { return embeddedAnim.duration; }
+	void  SetEmbeddedAnimSpeed(unsigned int id, float speed);
+	void  SetEmbeddedAnimTime(unsigned int id, float time);
+	void  SetEmbeddedAnimWeight(unsigned int id, float weight);
+	float GetEmbeddedAnimTime(unsigned int id)  const;
+	float GetEmbeddedAnimDuration(const std::string& name) const;
+	bool  IsEmbeddedAnimPlaying(const std::string& name) const;
 
 	// animation, used by CCobThread
+	void RestorePieceTurn(int piece, int axis, float speed);
+	void RestorePieceMove(int piece, int axis, float speed);
+	void RestorePieceScale(int piece, float speed);
+
 	void Spin(int piece, int axis, float speed, float accel);
 	void StopSpin(int piece, int axis, float decel);
 	void Turn(int piece, int axis, float speed, float destination);
@@ -177,7 +196,7 @@ public:
 		return (FindAnim(type, piece, axis) != anims.end());
 	}
 	bool HaveAnimations() const {
-		return (!anims.empty() || embeddedAnim.isPlaying);
+		return (!anims.empty() || !embeddedAnims.empty());
 	}
 
 	// checks for callin existence

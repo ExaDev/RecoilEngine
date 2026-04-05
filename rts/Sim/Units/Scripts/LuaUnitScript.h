@@ -166,6 +166,9 @@ private:
 	static int Turn(lua_State* L);
 	static int Move(lua_State* L);
 	static int Scale(lua_State* L);
+	static int RestoreTurn(lua_State* L);
+	static int RestoreMove(lua_State* L);
+	static int RestoreScale(lua_State* L);
 	static int IsInAnimation(lua_State* L, const char* caller, AnimType type);
 	static int IsInTurn(lua_State* L);
 	static int IsInMove(lua_State* L);
@@ -200,8 +203,10 @@ private:
 	static int StopAnimation(lua_State* L);
 	static int SetAnimationSpeed(lua_State* L);
 	static int SetAnimationTime(lua_State* L);
+	static int SetAnimationWeight(lua_State* L);
 	static int GetAnimationTime(lua_State* L);
 	static int GetAnimationDuration(lua_State* L);
+	static int IsAnimationPlaying(lua_State* L);
 };
 
 #endif
