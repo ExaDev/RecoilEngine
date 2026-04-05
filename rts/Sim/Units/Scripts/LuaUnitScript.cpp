@@ -1539,7 +1539,7 @@ int CLuaUnitScript::PlayAnimation(lua_State* L)
 
 	const std::string name = luaL_checkstring(L, 1);
 	const float speed = luaL_optfloat(L, 2, 1.0f);
-	const bool  loop  = lua_isnoneornil(L, 3) || lua_toboolean(L, 3);
+	const bool  loop  = luaL_optboolean(L, 3, false);
 	activeScript->PlayEmbeddedAnimation(name, speed, loop);
 	return 0;
 }

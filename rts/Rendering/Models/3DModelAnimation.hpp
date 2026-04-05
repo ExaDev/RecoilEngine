@@ -55,7 +55,7 @@ namespace ModelAnimation {
 			auto pieceAnimMapIt = animMapIt->second.find(animPieceIdx);
 			if (pieceAnimMapIt == animMapIt->second.end())
 				return nullptr;
-				
+
 			return &std::get<TypedSequence<T>>(pieceAnimMapIt->second);
 		}
 
@@ -68,7 +68,9 @@ namespace ModelAnimation {
 		// Returns the duration (seconds) of the named animation, or 0.0 if not found.
 		float GetAnimationDuration(const std::string& name) const;
 
+		MapType::const_iterator cbegin() const { return animationMap.cbegin(); }
 		MapType::const_iterator cend() const { return animationMap.cend(); }
+		size_t size() const { return animationMap.size(); }
 	private:
 		MapType animationMap;
 	};
