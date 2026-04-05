@@ -437,6 +437,7 @@ void CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed, bo
 		return;
 
 	const S3DModel* model = pieces[0]->original->GetParentModel();
+
 	if (!model->animationMap.HasAnimation(name)) {
 		ShowUnitScriptError("PlayAnimation: animation '" + name + "' not found");
 		return;
