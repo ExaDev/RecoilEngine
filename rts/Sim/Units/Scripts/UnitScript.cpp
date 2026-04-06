@@ -531,7 +531,7 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 	}
 }
 
-uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string &name, float speed, bool loop, float weight)
+uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight)
 {
 	if (pieces.empty())
 		return static_cast<uint32_t>(-1);
@@ -543,6 +543,18 @@ uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string &name, float speed
 		return static_cast<uint32_t>(-1);
 	}
 
+	for (uint32_t i = 0; i < embeddedAnims.size(); ++i) {
+		auto& embeddedAnim = embeddedAnims[i];
+		if (embeddedAnim.isPlaying && embeddedAnim.animName == name) {
+			embeddedAnim.playSpeed   = speed;
+			embeddedAnim.isLooping   = loop;
+			embeddedAnim.weight      = weight;
+			embeddedAnim.currentTime = 0.0f;
+			embeddedAnim.isPlaying   = true;
+			return i;
+		}
+	}
+
 	EmbeddedAnimPlayer anim;
 	anim.animName    = name;
 	anim.playSpeed   = speed;
@@ -552,8 +564,12 @@ uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string &name, float speed
 	anim.currentTime = 0.0f;
 	anim.isPlaying   = true;
 
+	const bool hadAnimation = HaveAnimations();
+
 	const uint32_t id = embeddedAnims.Add(anim);
-	unitScriptEngine->AddInstance(this);
+	if (!hadAnimation)
+		unitScriptEngine->AddInstance(this);
+
 	return id;
 }
 
@@ -563,7 +579,7 @@ void CUnitScript::StopEmbeddedAnimation(uint32_t id)
 		embeddedAnims.Del(id);
 }
 
-void CUnitScript::StopEmbeddedAnimationByString(const std::string &name)
+void CUnitScript::StopEmbeddedAnimationByString(const std::string& name)
 {
 	for (uint32_t i = 0; i < embeddedAnims.size(); ++i) {
 		if (embeddedAnims[i].isPlaying && embeddedAnims[i].animName == name)
@@ -601,7 +617,7 @@ float CUnitScript::GetEmbeddedAnimTime(uint32_t id) const
 	return 0.0f;
 }
 
-float CUnitScript::GetEmbeddedAnimDuration(const std::string &name) const
+float CUnitScript::GetEmbeddedAnimDuration(const std::string& name) const
 {
 	if (pieces.empty())
 		return 0.0f;
@@ -610,9 +626,9 @@ float CUnitScript::GetEmbeddedAnimDuration(const std::string &name) const
 	return model->animationMap.GetAnimationDuration(name);
 }
 
-bool CUnitScript::IsEmbeddedAnimPlaying(const std::string &name) const
+bool CUnitScript::IsEmbeddedAnimPlaying(const std::string& name) const
 {
-	for (const auto& anim : embeddedAnims.GetData()) {
+	for (const auto& anim : embeddedAnims) {
 		if (anim.isPlaying && anim.animName == name)
 			return true;
 	}
