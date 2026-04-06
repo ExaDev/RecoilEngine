@@ -313,8 +313,14 @@ bool CUnitScript::TickAnimFinished()
 	// don't clear doneAnims for the purpose of capturing them in DumpState
 	//doneAnims.clear();
 
-	for (const auto& [id, name] : doneEmbeddedAnims)
+	for (const auto& [id, name] : doneEmbeddedAnims) {
+		// Clear hasWaiting before firing so a subsequent StopAnimation on the
+		// held animation does not re-trigger EmbeddedAnimFinished spuriously.
+		if (id < embeddedAnims.size())
+			embeddedAnims[id].hasWaiting = false;
+
 		EmbeddedAnimFinished(id, name);
+	}
 
 	return HaveAnimations();
 }
@@ -559,6 +565,9 @@ uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed
 	for (uint32_t i = 0; i < embeddedAnims.size(); ++i) {
 		auto& embeddedAnim = embeddedAnims[i];
 		if (embeddedAnim.isPlaying && embeddedAnim.animName == name) {
+			// Wake existing waiters before restarting so they are not orphaned.
+			const bool hadWaiting = embeddedAnim.hasWaiting;
+
 			embeddedAnim.playSpeed          = speed;
 			embeddedAnim.isLooping          = loop;
 			embeddedAnim.weight             = weight;
@@ -566,6 +575,10 @@ uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed
 			embeddedAnim.isPlaying          = true;
 			embeddedAnim.hasWaiting         = wait;
 			embeddedAnim.hasFiredCompletion = false;
+
+			if (hadWaiting && !wait)
+				EmbeddedAnimFinished(i, embeddedAnim.animName);
+
 			return i;
 		}
 	}
@@ -591,21 +604,42 @@ uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed
 
 void CUnitScript::StopEmbeddedAnimation(uint32_t id)
 {
-	if (id < embeddedAnims.size() && embeddedAnims[id].isPlaying)
-		embeddedAnims.Del(id);
+	if (id >= embeddedAnims.size() || !embeddedAnims[id].isPlaying)
+		return;
+
+	const bool hadWaiting = embeddedAnims[id].hasWaiting;
+	const auto animName = std::move(embeddedAnims[id].animName);
+	embeddedAnims.Del(id);
+
+	if (hadWaiting)
+		EmbeddedAnimFinished(id, animName);
 }
 
 void CUnitScript::StopEmbeddedAnimationByString(const std::string& name)
 {
-	for (uint32_t i = 0; i < embeddedAnims.size(); ++i) {
-		if (embeddedAnims[i].isPlaying && embeddedAnims[i].animName == name)
-			embeddedAnims.Del(i);
-	}
+	auto it = std::find_if(embeddedAnims.begin(), embeddedAnims.end(), [&](const auto& anim) { return anim.animName == name; });
+	if (it == embeddedAnims.end())
+		return;
+
+	const bool hadWaiting = it->hasWaiting;
+	const auto animName = std::move(it->animName);
+	embeddedAnims.Del(std::distance(embeddedAnims.begin(), it));
+
+	if (hadWaiting)
+		EmbeddedAnimFinished(std::distance(embeddedAnims.begin(), it), animName);
 }
 
 void CUnitScript::StopEmbeddedAnimations()
 {
-	embeddedAnims.clear();
+	auto tmpEmbeddedAnims = std::move(embeddedAnims);
+
+	for (auto id = 0; id < tmpEmbeddedAnims.size(); ++id) {
+		const auto& anim = tmpEmbeddedAnims[id];
+		if (anim.isPlaying && anim.hasWaiting)
+			EmbeddedAnimFinished(static_cast<uint32_t>(id), anim.animName);
+	}
+	tmpEmbeddedAnims.clear();
+	embeddedAnims = std::move(tmpEmbeddedAnims);
 }
 
 void CUnitScript::SetEmbeddedAnimSpeed(uint32_t id, float speed)
