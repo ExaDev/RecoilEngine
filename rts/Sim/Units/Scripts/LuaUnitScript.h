@@ -134,6 +134,7 @@ public:
 
 	// special callin to allow Lua to resume threads blocking on this anim
 	void AnimFinished(AnimType type, int piece, int axis) override;
+	void EmbeddedAnimFinished(uint32_t animId, const std::string& animName) override;
 
 public:
 	static void HandleFreed(CLuaHandle* handle);

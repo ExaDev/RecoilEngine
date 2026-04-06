@@ -80,7 +80,9 @@ CR_REG_METADATA_SUB(CUnitScript, EmbeddedAnimPlayer, (
 	CR_MEMBER(duration),
 	CR_MEMBER(weight),
 	CR_MEMBER(isPlaying),
-	CR_MEMBER(isLooping)
+	CR_MEMBER(isLooping),
+	CR_MEMBER(hasWaiting),
+	CR_MEMBER(hasFiredCompletion)
 ))
 
 CR_BIND(CUnitScript::AnimInfo,)
@@ -311,6 +313,9 @@ bool CUnitScript::TickAnimFinished()
 	// don't clear doneAnims for the purpose of capturing them in DumpState
 	//doneAnims.clear();
 
+	for (const auto& [id, name] : doneEmbeddedAnims)
+		EmbeddedAnimFinished(id, name);
+
 	return HaveAnimations();
 }
 
@@ -400,8 +405,11 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 	std::vector<ActiveAnim> activeAnims;
 	activeAnims.reserve(embeddedAnims.size());
 
+	doneEmbeddedAnims.clear();
+
 	bool anyPlaying = false;
-	for (auto& anim : embeddedAnims) {
+	for (uint32_t animId = 0; animId < embeddedAnims.size(); ++animId) {
+		auto& anim = embeddedAnims[animId];
 		if (!anim.isPlaying)
 			continue;
 
@@ -409,10 +417,15 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 
 		if (anim.duration > 0.0f) {
 			anim.currentTime += anim.playSpeed / tickRate;
-			if (anim.isLooping)
+			if (anim.isLooping) {
 				anim.currentTime = std::fmod(anim.currentTime, anim.duration);
-			else
+			} else {
 				anim.currentTime = std::min(anim.currentTime, anim.duration);
+				if (anim.hasWaiting && !anim.hasFiredCompletion && anim.currentTime >= anim.duration) {
+					anim.hasFiredCompletion = true;
+					doneEmbeddedAnims.emplace_back(animId, anim.animName);
+				}
+			}
 		}
 
 		if (anim.weight > 0.0f) {
@@ -531,7 +544,7 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 	}
 }
 
-uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight)
+uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight, bool wait)
 {
 	if (pieces.empty())
 		return static_cast<uint32_t>(-1);
@@ -546,11 +559,13 @@ uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed
 	for (uint32_t i = 0; i < embeddedAnims.size(); ++i) {
 		auto& embeddedAnim = embeddedAnims[i];
 		if (embeddedAnim.isPlaying && embeddedAnim.animName == name) {
-			embeddedAnim.playSpeed   = speed;
-			embeddedAnim.isLooping   = loop;
-			embeddedAnim.weight      = weight;
-			embeddedAnim.currentTime = 0.0f;
-			embeddedAnim.isPlaying   = true;
+			embeddedAnim.playSpeed          = speed;
+			embeddedAnim.isLooping          = loop;
+			embeddedAnim.weight             = weight;
+			embeddedAnim.currentTime        = 0.0f;
+			embeddedAnim.isPlaying          = true;
+			embeddedAnim.hasWaiting         = wait;
+			embeddedAnim.hasFiredCompletion = false;
 			return i;
 		}
 	}
@@ -563,6 +578,7 @@ uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed
 	anim.duration    = model->animationMap.GetAnimationDuration(name);
 	anim.currentTime = 0.0f;
 	anim.isPlaying   = true;
+	anim.hasWaiting  = wait;
 
 	const bool hadAnimation = HaveAnimations();
 

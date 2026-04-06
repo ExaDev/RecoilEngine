@@ -55,6 +55,7 @@ protected:
 
 	AnimContainerType anims;
 	AnimContainerType doneAnims;
+	std::vector<std::pair<uint32_t, std::string>> doneEmbeddedAnims;
 
 	struct EmbeddedPieceState {
 		float3 pos;
@@ -66,12 +67,14 @@ protected:
 	struct EmbeddedAnimPlayer {
 		CR_DECLARE_STRUCT(EmbeddedAnimPlayer)
 		std::string animName;
-		float currentTime = 0.0f;
-		float playSpeed   = 1.0f;
-		float duration    = 0.0f;
-		float weight      = 1.0f;
-		bool  isPlaying   = false;
-		bool  isLooping   = true;
+		float currentTime        = 0.0f;
+		float playSpeed          = 1.0f;
+		float duration           = 0.0f;
+		float weight             = 1.0f;
+		bool  isPlaying          = false;
+		bool  isLooping          = true;
+		bool  hasWaiting         = false;  // opt-in to EmbeddedAnimFinished callback
+		bool  hasFiredCompletion = false;  // fire-once guard
 	};
 	spring::FreeListMap<EmbeddedAnimPlayer> embeddedAnims;
 
@@ -149,7 +152,7 @@ public:
 	void TickEmbeddedAnim(int tickRate);
 
 	// animation, used by Lua unit scripts
-	unsigned int PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight);
+	unsigned int PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight, bool wait = false);
 	void StopEmbeddedAnimation(unsigned int id);
 	void StopEmbeddedAnimationByString(const std::string& name);
 	void StopEmbeddedAnimations();
@@ -258,6 +261,7 @@ public:
 	virtual bool  BlockShot(int weaponNum, const CUnit* targetUnit, bool userTarget) = 0; // returns whether shot should be blocked
 	virtual float TargetWeight(int weaponNum, const CUnit* targetUnit) = 0; // returns target weight
 	virtual void AnimFinished(AnimType type, int piece, int axis) = 0;
+	virtual void EmbeddedAnimFinished(uint32_t animId, const std::string& animName) {}
 public:
 	const auto& GetLiveAnims() const { return anims; }
 	const auto& GetDoneAnims() const { return doneAnims; }

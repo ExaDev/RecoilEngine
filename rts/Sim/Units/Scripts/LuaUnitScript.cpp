@@ -944,6 +944,23 @@ void CLuaUnitScript::AnimFinished(AnimType type, int piece, int axis)
 }
 
 
+void CLuaUnitScript::EmbeddedAnimFinished(uint32_t animId, const std::string& animName)
+{
+	ZoneScoped;
+	const int fn = scriptIndex[LUAFN_AnimationFinished];
+	if (fn < 0)
+		return;
+
+	LUA_CALL_IN_CHECK(L);
+	lua_checkstack(L, 4);
+
+	RawPushFunction(fn);
+	lua_pushnumber(L, animId);
+	lua_pushsstring(L, animName);
+	RawRunCallIn(fn, 2, 0);
+}
+
+
 void CLuaUnitScript::RawCall(int functionId)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
@@ -1591,10 +1608,30 @@ int CLuaUnitScript::PlayAnimation(lua_State* L)
 		return 0;
 
 	const std::string name = luaL_checkstring(L, 1);
-	const float speed  = luaL_optfloat(L, 2, 1.0f);
-	const bool  loop   = luaL_optboolean(L, 3, false);
-	const float weight = luaL_optfloat(L, 4, 1.0f);
-	const uint32_t id  = activeScript->PlayEmbeddedAnimation(name, speed, loop, weight);
+	float speed  = 1.0f;
+	bool  loop   = false;
+	float weight = 1.0f;
+	bool  wait   = false;
+
+	if (lua_istable(L, 2)) {
+		lua_getfield(L, 2, "speed");
+		speed = luaL_optfloat(L, -1, speed);
+		lua_pop(L, 1);
+
+		lua_getfield(L, 2, "loop");
+		loop = luaL_optboolean(L, -1, loop);
+		lua_pop(L, 1);
+
+		lua_getfield(L, 2, "weight");
+		weight = luaL_optfloat(L, -1, weight);
+		lua_pop(L, 1);
+
+		lua_getfield(L, 2, "wait");
+		wait = luaL_optboolean(L, -1, wait);
+		lua_pop(L, 1);
+	}
+
+	const uint32_t id = activeScript->PlayEmbeddedAnimation(name, speed, loop, weight, wait);
 	lua_pushnumber(L, id);
 	return 1;
 }
