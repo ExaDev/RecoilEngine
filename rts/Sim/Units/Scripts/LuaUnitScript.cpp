@@ -1644,10 +1644,10 @@ int CLuaUnitScript::StopAnimation(lua_State* L)
 
 	if (lua_gettop(L) == 0 || lua_isnoneornil(L, 1)) {
 		activeScript->StopEmbeddedAnimations();
-	} else if (lua_isstring(L, 1)) {
-		activeScript->StopEmbeddedAnimationByString(lua_tostring(L, 1));
 	} else if (lua_isnumber(L, 1)) {
 		activeScript->StopEmbeddedAnimation(lua_toint(L, 1));
+	} else if (lua_isstring(L, 1)) {
+		activeScript->StopEmbeddedAnimationByString(lua_tostring(L, 1));
 	}
 	return 0;
 }
