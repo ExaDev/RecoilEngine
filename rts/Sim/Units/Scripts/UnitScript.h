@@ -68,9 +68,11 @@ protected:
 		float playSpeed             = 1.0f;
 		float weight                = 1.0f;
 		bool  isActive              = false;
-		bool  isLooping             = true;
+		int8_t loopMode             = 0;      // 0=no loop, >0=forward loop, <0=reverse loop
+		bool  isAdditive            = false;  // if true, contribution is not normalized (delta on top of blend)
 		bool  hasWaiting            = false;  // opt-in to EmbeddedAnimFinished callback
 		bool  hasFiredCompletion    = false;  // guards re-fire on non-looping hold
+		std::vector<float> pieceWeights;      // per-piece weight multipliers; empty = all 1.0
 	};
 
 	std::vector<EmbeddedAnimPlayer> animPlayers;
@@ -149,13 +151,14 @@ public:
 	void TickEmbeddedAnim(int tickRate);
 
 	// animation, used by Lua unit scripts
-	uint32_t PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight, bool wait = false);
+	uint32_t PlayEmbeddedAnimation(const std::string& name, float speed, int8_t loopMode, float weight, bool wait = false, bool additive = false);
 	void StopEmbeddedAnimation(uint32_t clipId);
 	void StopEmbeddedAnimations();
 
 	void  SetEmbeddedAnimSpeed(uint32_t clipId, float speed);
 	void  SetEmbeddedAnimTime(uint32_t clipId, float time);
 	void  SetEmbeddedAnimWeight(uint32_t clipId, float weight);
+	void  SetEmbeddedAnimPieceWeights(uint32_t clipId, const std::vector<float>& weights);
 	float GetEmbeddedAnimTime(uint32_t clipId)  const;
 	float GetEmbeddedAnimDuration(const std::string& name) const;
 	float GetEmbeddedAnimDuration(uint32_t clipId)         const;

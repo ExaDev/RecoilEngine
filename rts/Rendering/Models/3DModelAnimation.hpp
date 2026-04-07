@@ -11,10 +11,20 @@
 #include "System/Quaternion.h"
 
 namespace ModelAnimation {
+	enum class Interpolation : uint8_t {
+		Linear = 0,
+		Step = 1,
+		CubicSpline = 2
+	};
+
 	template<typename T>
 	struct TypedSequence {
 		std::vector<float> timeFrames;
 		std::vector<T> values;
+		// only populated for CubicSpline interpolation
+		std::vector<T> inTangents;
+		std::vector<T> outTangents;
+		Interpolation interpolation = Interpolation::Linear;
 	};
 
 	using Sequence = std::tuple<

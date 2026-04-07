@@ -646,7 +646,7 @@ void DumpState(int newMinFrameNum, int newMaxFrameNum, int newFramePeriod, std::
 						<< " playSpeed: " << a.playSpeed
 						<< " weight: " << a.weight
 						<< " isActive: " << a.isActive
-						<< " isLooping: " << a.isLooping
+						<< " loopMode: " << static_cast<int>(a.loopMode)
 						<< " hasWaiting: " << a.hasWaiting
 						<< " hasFiredCompletion: " << a.hasFiredCompletion
 						<< "\n";

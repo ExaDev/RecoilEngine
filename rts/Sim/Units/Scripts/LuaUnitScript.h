@@ -205,6 +205,7 @@ private:
 	static int SetAnimationSpeed(lua_State* L);
 	static int SetAnimationTime(lua_State* L);
 	static int SetAnimationWeight(lua_State* L);
+	static int SetAnimationPieceWeights(lua_State* L);
 	static int GetAnimationTime(lua_State* L);
 	static int GetAnimationDuration(lua_State* L);
 	static int GetAnimationId(lua_State* L);
