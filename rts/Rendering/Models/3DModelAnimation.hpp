@@ -43,45 +43,46 @@ namespace ModelAnimation {
 
 	class Map {
 	public:
-		uint32_t GetOrAddAnimation(const std::string& name) {
+		size_t GetOrAddAnimation(const std::string& name) {
 			auto it = std::find_if(animationMap.begin(), animationMap.end(), [&name](const AnimationEntry& entry) { return entry.name == name; });
 
 			if (it != animationMap.end())
-				return std::distance(animationMap.begin(), it);
+				return static_cast<size_t>(std::distance(animationMap.begin(), it));
 
-			const uint32_t id = static_cast<uint32_t>(animationMap.size());
+			const size_t id = animationMap.size();
 			animationMap.emplace_back(name, 0.0f, PieceInfoDataMap{});
 			return id;
 		}
+
 		template<typename T>
-		TypedSequence<T>& GetPieceAnimationVectors(uint32_t id, size_t pieceIdx) {
-			assert(id < static_cast<uint32_t>(animationMap.size()));
+		TypedSequence<T>& GetPieceAnimationVectors(size_t id, size_t pieceIdx) {
+			assert(id < animationMap.size());
 			return std::get<TypedSequence<T>>(animationMap[id].pieceData[pieceIdx]);
 		}
 
-		// --- Runtime API ---
-
 		// Const access to piece sequences for sampling. Returns nullptr if not found.
 		template<typename T>
-		const TypedSequence<T>* GetPieceAnimationVectors(uint32_t id, size_t pieceIdx) const {
-			if (id >= static_cast<uint32_t>(animationMap.size()))
+		const TypedSequence<T>* GetPieceAnimationVectors(size_t id, size_t pieceIdx) const {
+			if (id >= animationMap.size())
 				return nullptr;
+
 			auto pieceIt = animationMap[id].pieceData.find(pieceIdx);
 			if (pieceIt == animationMap[id].pieceData.end())
 				return nullptr;
+
 			return &std::get<TypedSequence<T>>(pieceIt->second);
 		}
 
-		// Removes animations/sequences whose data is all-default, compacts the vector,
-		void RemoveEmptyAnimations();
+		// Removes animations/sequences whose data is all-default, compacts the vector
+		void FinalizeAnimations();
 
-		// Returns clip ID, or uint32_t(-1) if not found.
-		uint32_t GetAnimationId(const std::string& name) const {
+		// Returns clip ID, or size_t(-1) if not found.
+		size_t GetAnimationId(const std::string& name) const {
 			auto it = std::find_if(animationMap.begin(), animationMap.end(), [&name](const AnimationEntry& entry) { return entry.name == name; });
-			return (it != animationMap.end()) ? std::distance(animationMap.begin(), it) : static_cast<uint32_t>(-1);
+			return (it != animationMap.end()) ? static_cast<size_t>(std::distance(animationMap.begin(), it)) : static_cast<size_t>(-1);
 		}
 
-		const std::string& GetAnimationName(uint32_t id) const {
+		const std::string& GetAnimationName(size_t id) const {
 			return animationMap[id].name;
 		}
 
@@ -90,24 +91,24 @@ namespace ModelAnimation {
 			return it != animationMap.end();
 		}
 
-		bool HasAnimation(uint32_t id) const {
-			return id < static_cast<uint32_t>(animationMap.size());
+		bool HasAnimation(size_t id) const {
+			return id < animationMap.size();
 		}
 
 		float GetAnimationDuration(const std::string& name) const {
-			const uint32_t id = GetAnimationId(name);
-			return (id != static_cast<uint32_t>(-1)) ? animationMap[id].duration : 0.0f;
+			const size_t id = GetAnimationId(name);
+			return (id != static_cast<size_t>(-1)) ? animationMap[id].duration : 0.0f;
 		}
 
-		float GetAnimationDuration(uint32_t id) const {
+		float GetAnimationDuration(size_t id) const {
 			return HasAnimation(id) ? animationMap[id].duration : 0.0f;
 		}
 
-		AnimationEntry& operator[](uint32_t id) {
+		AnimationEntry& operator[](size_t id) {
 			return animationMap[id];
 		}
 
-		const AnimationEntry& operator[](uint32_t id) const {
+		const AnimationEntry& operator[](size_t id) const {
 			return animationMap[id];
 		}
 

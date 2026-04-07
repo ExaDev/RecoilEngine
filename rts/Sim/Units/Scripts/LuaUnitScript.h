@@ -134,7 +134,7 @@ public:
 
 	// special callin to allow Lua to resume threads blocking on this anim
 	void AnimFinished(AnimType type, int piece, int axis) override;
-	void EmbeddedAnimFinished(uint32_t animId, const std::string& animName) override;
+	void EmbeddedAnimFinished(size_t animId, const std::string& animName) override;
 
 public:
 	static void HandleFreed(CLuaHandle* handle);
@@ -211,7 +211,7 @@ private:
 	static int GetAnimationId(lua_State* L);
 	static int IsAnimationPlaying(lua_State* L);
 	// Helper function to read animation id from lua state
-	static int ReadAnimationId(lua_State* L);
+	static size_t ReadAnimationId(lua_State* L);
 };
 
 #endif

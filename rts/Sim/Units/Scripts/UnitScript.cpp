@@ -67,7 +67,11 @@ CR_REG_METADATA(CUnitScript, (
 	CR_IGNORED(pieces),
 	CR_IGNORED(hasSetSFXOccupy),
 	CR_IGNORED(hasRockUnit),
-	CR_IGNORED(hasStartBuilding)
+	CR_IGNORED(hasStartBuilding),
+
+	// Rebuilt lazily from immutable model data
+	CR_IGNORED(channelCache),
+	CR_IGNORED(scriptClaimedAxesBuf)
 ))
 
 CR_BIND(CUnitScript::EmbeddedAnimPlayer,)
@@ -398,16 +402,57 @@ bool CUnitScript::TickScaleAnim(int tickRate, LocalModelPiece& lmp, AnimInfo& ai
 	return b;
 }
 
+void CUnitScript::RebuildChannelCache()
+{
+	const auto* model = unit->model;
+	const size_t numClips  = animPlayers.size();
+	const size_t numPieces = pieces.size();
+
+	channelCache.resize(numClips * numPieces);
+
+	for (size_t clipId = 0; clipId < numClips; ++clipId) {
+		for (size_t si = 0; si < numPieces; ++si) {
+			const size_t pieceIdx = static_cast<size_t>(pieces[si]->GetLModelPieceIndex());
+			auto& entry = channelCache[clipId * numPieces + si];
+			entry.posSeq   = model->animationMap.GetPieceAnimationVectors<float3>(clipId, pieceIdx);
+			entry.rotSeq   = model->animationMap.GetPieceAnimationVectors<CQuaternion>(clipId, pieceIdx);
+			entry.scaleSeq = model->animationMap.GetPieceAnimationVectors<float>(clipId, pieceIdx);
+		}
+	}
+}
+
 void CUnitScript::TickEmbeddedAnim(int tickRate)
 {
 	if (pieces.empty() || animPlayers.empty())
 		return;
 
 	const auto* model = unit->model;
+	const size_t numPieces = pieces.size();
+	const size_t numClips  = animPlayers.size();
+
+	if (channelCache.size() != numClips * numPieces)
+		RebuildChannelCache();
+
+	// This replaces ~10 O(anims) FindAnim() calls per piece in the apply section below.
+	scriptClaimedAxesBuf.assign(numPieces, PieceScriptClaim{});
+	for (const auto& ai : anims) {
+		if (ai.piece < 0 || static_cast<size_t>(ai.piece) >= numPieces)
+			continue;
+
+		auto& scriptClaimedVal = scriptClaimedAxesBuf[static_cast<size_t>(ai.piece)];
+
+		switch (ai.animType) {
+			case AMove:  scriptClaimedVal.SetMove(ai.axis); break;
+			case ATurn:  scriptClaimedVal.SetTurn(ai.axis); break;
+			case ASpin:  scriptClaimedVal.SetSpin(ai.axis); break;
+			case AScale: scriptClaimedVal.SetScale();       break;
+			default: break;
+		}
+	}
 
 	doneEmbeddedAnims.clear();
 
-	embeddedPieceStates.resize(pieces.size());
+	embeddedPieceStates.resize(numPieces);
 
 	for (uint32_t clipId = 0; clipId < static_cast<uint32_t>(animPlayers.size()); ++clipId) {
 		auto& animPlayer = animPlayers[clipId];
@@ -418,7 +463,7 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 		const float duration = model->animationMap[clipId].duration;
 		assert(duration > 0.0f);
 
-		animPlayer.currentTime += animPlayer.playSpeed / tickRate;
+		animPlayer.currentTime += animPlayer.playSpeed / static_cast<float>(tickRate);
 
 		auto CompleteAnim = [&]() {
 			if (!animPlayer.hasFiredCompletion) {
@@ -450,23 +495,24 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 		}
 	}
 
-	for (int si = 0, n = static_cast<int>(pieces.size()); si < n; si++) {
+	for (size_t si = 0; si < numPieces; si++) {
 		LocalModelPiece* lmp = pieces[si];
 
 		if (!lmp)
 			continue;
 
-		const size_t pieceIdx = static_cast<size_t>(lmp->GetLModelPieceIndex());
-
-		float3 posAccum = ZeroVector;
+		float3 posAccum   = ZeroVector;
 		float4 rotAccum(0.0f, 0.0f, 0.0f, 0.0f);
 		float  scaleAccum = 0.0f;
 
-		float sumPosWeight = 0.0f;
-		float sumRotWeight = 0.0f;
+		float sumPosWeight   = 0.0f;
+		float sumRotWeight   = 0.0f;
 		float sumScaleWeight = 0.0f;
 
-		for (uint32_t clipId = 0; clipId < static_cast<uint32_t>(animPlayers.size()); ++clipId) {
+		// channelCache is laid out as [clip0_piece0, clip0_piece1, ..., clip1_piece0, ...].
+		const ClipPieceCache* pieceCache = channelCache.data() + si;
+
+		for (size_t clipId = 0; clipId < numClips; ++clipId, pieceCache += numPieces) {
 			const auto& animPlayer = animPlayers[clipId];
 
 			if (!animPlayer.isActive)
@@ -476,81 +522,69 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 				continue;
 
 			// Per-piece weight multiplier (bone mask)
-			const float pieceW = (!animPlayer.pieceWeights.empty() && si < static_cast<int>(animPlayer.pieceWeights.size()))
+			const float pieceW = (!animPlayer.pieceWeights.empty() && si < animPlayer.pieceWeights.size())
 				? animPlayer.pieceWeights[si]
 				: 1.0f;
 			if (pieceW <= 0.0f)
 				continue;
 
 			const float effectiveWeight = animPlayer.weight * pieceW;
+			const float t = animPlayer.currentTime;
 
-			if (const auto* seq = model->animationMap.GetPieceAnimationVectors<float3>(clipId, pieceIdx)) {
-				if (!seq->timeFrames.empty()) {
-					posAccum += ModelAnimation::SampleSequence(*seq, animPlayer.currentTime) * effectiveWeight;
-					if (!animPlayer.isAdditive)
-						sumPosWeight += effectiveWeight;
-				}
+			if (const auto* seq = pieceCache->posSeq; seq && !seq->timeFrames.empty()) {
+				posAccum += ModelAnimation::SampleSequence(*seq, t) * effectiveWeight;
+				if (!animPlayer.isAdditive)
+					sumPosWeight += effectiveWeight;
 			}
 
-			if (const auto* seq = model->animationMap.GetPieceAnimationVectors<CQuaternion>(clipId, pieceIdx)) {
-				if (!seq->timeFrames.empty()) {
-					CQuaternion qAnim = ModelAnimation::SampleSequence(*seq, animPlayer.currentTime);
-					if (sumRotWeight > 0.0f) {
-						if (rotAccum.x * qAnim.x + rotAccum.y * qAnim.y + rotAccum.z * qAnim.z + rotAccum.w * qAnim.r < 0.0f) {
-							qAnim.x = -qAnim.x;
-							qAnim.y = -qAnim.y;
-							qAnim.z = -qAnim.z;
-							qAnim.r = -qAnim.r;
-						}
+			if (const auto* seq = pieceCache->rotSeq; seq && !seq->timeFrames.empty()) {
+				CQuaternion qAnim = ModelAnimation::SampleSequence(*seq, t);
+				if (sumRotWeight > 0.0f) {
+					if (rotAccum.x * qAnim.x + rotAccum.y * qAnim.y + rotAccum.z * qAnim.z + rotAccum.w * qAnim.r < 0.0f) {
+						qAnim.x = -qAnim.x;
+						qAnim.y = -qAnim.y;
+						qAnim.z = -qAnim.z;
+						qAnim.r = -qAnim.r;
 					}
-					rotAccum.x += qAnim.x * effectiveWeight;
-					rotAccum.y += qAnim.y * effectiveWeight;
-					rotAccum.z += qAnim.z * effectiveWeight;
-					rotAccum.w += qAnim.r * effectiveWeight;
-					if (!animPlayer.isAdditive)
-						sumRotWeight += effectiveWeight;
 				}
+				rotAccum.x += qAnim.x * effectiveWeight;
+				rotAccum.y += qAnim.y * effectiveWeight;
+				rotAccum.z += qAnim.z * effectiveWeight;
+				rotAccum.w += qAnim.r * effectiveWeight;
+				if (!animPlayer.isAdditive)
+					sumRotWeight += effectiveWeight;
 			}
 
-			if (const auto* seq = model->animationMap.GetPieceAnimationVectors<float>(clipId, pieceIdx)) {
-				if (!seq->timeFrames.empty()) {
-					scaleAccum += ModelAnimation::SampleSequence(*seq, animPlayer.currentTime) * effectiveWeight;
-					if (!animPlayer.isAdditive)
-						sumScaleWeight += effectiveWeight;
-				}
+			if (const auto* seq = pieceCache->scaleSeq; seq && !seq->timeFrames.empty()) {
+				scaleAccum += ModelAnimation::SampleSequence(*seq, t) * effectiveWeight;
+				if (!animPlayer.isAdditive)
+					sumScaleWeight += effectiveWeight;
 			}
 		}
-
-		// For additive clips there is no normalization — posAccum/rotAccum/scaleAccum hold the
-		// raw additive deltas. We treat any nonzero additive accumulation as "has contribution"
-		// by checking whether posAccum != 0, etc., but the easiest approach is to just always
-		// use the accumulated values when sumXWeight > 0 OR when there are additive contributors.
-		// We recompute whether any additive clips touched this piece by re-checking the sums:
-		// sumXWeight only counts normalized clips, but posAccum may still have additive content.
-		// The apply logic below handles both cases uniformly.
 
 		const bool hasPosContrib = (sumPosWeight > 0.0f) || (posAccum != ZeroVector);
 		const bool hasRotContrib = (sumRotWeight > 0.0f) || (rotAccum.x != 0.0f || rotAccum.y != 0.0f || rotAccum.z != 0.0f || rotAccum.w != 0.0f);
 
+		// Avoid FindAnim() scans per axis per piece
+		const PieceScriptClaim& claim = scriptClaimedAxesBuf[si];
+
 		if (hasPosContrib) {
-			float3 bindPos = lmp->original->offset;
+			const float3 bindPos = lmp->original->offset;
 			float3 finalPos;
 			if (sumPosWeight > 0.0f) {
-				// Normalized blend + additive delta
 				float3 blended = posAccum;
 				if (sumPosWeight < 1.0f)
 					blended += bindPos * (1.0f - sumPosWeight);
 				else
-					blended /= sumPosWeight; // additive portion already included in posAccum as-is
+					blended /= sumPosWeight;
 				finalPos = blended;
 			} else {
-				// Pure additive: add delta to bind pose
-				finalPos = bindPos + posAccum;
+				finalPos = bindPos + posAccum; // pure additive
 			}
 			embeddedPieceStates[si].pos = finalPos;
 			float3 cur = lmp->GetPosition();
 			for (int ax = 0; ax < 3; ax++) {
-				if (FindAnim(AMove, si, ax) == anims.end())
+				if (!claim.HasMove(ax))
 					cur[ax] = finalPos[ax];
 			}
 			lmp->SetPosition(cur);
@@ -560,7 +594,7 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 
 		if (hasRotContrib) {
 			if (sumRotWeight > 0.0f && sumRotWeight < 1.0f)
-				rotAccum.w += (1.0f - sumRotWeight); // blend toward bind pose (identity)
+				rotAccum.w += (1.0f - sumRotWeight);
 			CQuaternion finalQ(rotAccum.x, rotAccum.y, rotAccum.z, rotAccum.w);
 			finalQ.Normalize();
 
@@ -573,10 +607,9 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 
 			float3 cur = lmp->GetRotation();
 			for (int ax = 0; ax < 3; ax++) {
-				if (FindAnim(ATurn, si, ax) == anims.end() && FindAnim(ASpin, si, ax) == anims.end())
+				if (!claim.HasTurnOrSpin(ax))
 					cur[ax] = embRot[ax];
 			}
-
 			lmp->SetRotation(cur);
 		} else {
 			embeddedPieceStates[si].rot = ZeroVector;
@@ -592,11 +625,10 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 					scaleAccum /= sumScaleWeight;
 				finalScale = scaleAccum;
 			} else {
-				// Pure additive: delta on top of bind scale
-				finalScale = bindScale + scaleAccum;
+				finalScale = bindScale + scaleAccum; // pure additive
 			}
 			embeddedPieceStates[si].scale = finalScale;
-			if (FindAnim(AScale, si, -1) == anims.end())
+			if (!claim.HasScale())
 				lmp->SetScaling(finalScale);
 		} else {
 			embeddedPieceStates[si].scale = lmp->original->scale;
@@ -604,17 +636,17 @@ void CUnitScript::TickEmbeddedAnim(int tickRate)
 	}
 }
 
-uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed, int8_t loopMode, float weight, bool wait, bool additive)
+size_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed, int8_t loopMode, float weight, bool wait, bool additive)
 {
 	if (pieces.empty())
-		return static_cast<uint32_t>(-1);
+		return static_cast<size_t>(-1);
 
 	const auto* model = unit->model;
-	const uint32_t clipId = model->animationMap.GetAnimationId(name);
+	const size_t clipId = model->animationMap.GetAnimationId(name);
 
-	if (clipId == static_cast<uint32_t>(-1)) {
+	if (clipId == static_cast<size_t>(-1)) {
 		ShowUnitScriptError("PlayAnimation: animation '" + name + "' not found");
-		return static_cast<uint32_t>(-1);
+		return static_cast<size_t>(-1);
 	}
 
 	assert(clipId < animPlayers.size());
@@ -654,10 +686,10 @@ uint32_t CUnitScript::PlayEmbeddedAnimation(const std::string& name, float speed
 	return clipId;
 }
 
-void CUnitScript::StopEmbeddedAnimation(uint32_t clipId)
+void CUnitScript::StopEmbeddedAnimation(size_t clipId)
 {
 	const auto* model = unit->model;
-	if (clipId >= static_cast<uint32_t>(model->animationMap.size()) || !animPlayers[clipId].isActive)
+	if (clipId >= static_cast<size_t>(model->animationMap.size()) || !animPlayers[clipId].isActive)
 		return;
 
 	const bool hadWaiting = animPlayers[clipId].hasWaiting;
@@ -672,11 +704,11 @@ void CUnitScript::StopEmbeddedAnimation(uint32_t clipId)
 
 void CUnitScript::StopEmbeddedAnimations()
 {
-	for (uint32_t clipId = 0; clipId < static_cast<uint32_t>(animPlayers.size()); ++clipId) {
+	for (size_t clipId = 0; clipId < static_cast<size_t>(animPlayers.size()); ++clipId) {
 		animPlayers[clipId].isActive = false;
 	}
 
-	for (uint32_t clipId = 0; clipId < static_cast<uint32_t>(animPlayers.size()); ++clipId) {
+	for (size_t clipId = 0; clipId < static_cast<size_t>(animPlayers.size()); ++clipId) {
 		if (animPlayers[clipId].hasWaiting)
 			EmbeddedAnimFinished(clipId, unit->model->animationMap.GetAnimationName(clipId));
 	}
@@ -685,27 +717,27 @@ void CUnitScript::StopEmbeddedAnimations()
 		unitScriptEngine->RemoveInstance(this);
 }
 
-void CUnitScript::SetEmbeddedAnimSpeed(uint32_t clipId, float speed)
+void CUnitScript::SetEmbeddedAnimSpeed(size_t clipId, float speed)
 {
-	if (clipId < static_cast<uint32_t>(animPlayers.size()) && animPlayers[clipId].isActive)
+	if (clipId < static_cast<size_t>(animPlayers.size()) && animPlayers[clipId].isActive)
 		animPlayers[clipId].playSpeed = speed;
 }
 
-void CUnitScript::SetEmbeddedAnimTime(uint32_t clipId, float time)
+void CUnitScript::SetEmbeddedAnimTime(size_t clipId, float time)
 {
-	if (clipId < static_cast<uint32_t>(animPlayers.size()) && animPlayers[clipId].isActive)
+	if (clipId < static_cast<size_t>(animPlayers.size()) && animPlayers[clipId].isActive)
 		animPlayers[clipId].currentTime = time;
 }
 
-void CUnitScript::SetEmbeddedAnimWeight(uint32_t clipId, float weight)
+void CUnitScript::SetEmbeddedAnimWeight(size_t clipId, float weight)
 {
-	if (clipId < static_cast<uint32_t>(animPlayers.size()) && animPlayers[clipId].isActive)
+	if (clipId < static_cast<size_t>(animPlayers.size()) && animPlayers[clipId].isActive)
 		animPlayers[clipId].weight = weight;
 }
 
-float CUnitScript::GetEmbeddedAnimTime(uint32_t clipId) const
+float CUnitScript::GetEmbeddedAnimTime(size_t clipId) const
 {
-	if (clipId < static_cast<uint32_t>(animPlayers.size()) && animPlayers[clipId].isActive)
+	if (clipId < static_cast<size_t>(animPlayers.size()) && animPlayers[clipId].isActive)
 		return animPlayers[clipId].currentTime;
 	return 0.0f;
 }
@@ -717,7 +749,7 @@ float CUnitScript::GetEmbeddedAnimDuration(const std::string& name) const
 	return unit->model->animationMap.GetAnimationDuration(name);
 }
 
-float CUnitScript::GetEmbeddedAnimDuration(uint32_t clipId) const
+float CUnitScript::GetEmbeddedAnimDuration(size_t clipId) const
 {
 	if (pieces.empty())
 		return 0.0f;
@@ -729,19 +761,19 @@ bool CUnitScript::IsEmbeddedAnimPlaying(const std::string& name) const
 	return IsEmbeddedAnimPlaying(unit->model->animationMap.GetAnimationId(name));
 }
 
-bool CUnitScript::IsEmbeddedAnimPlaying(uint32_t clipId) const
+bool CUnitScript::IsEmbeddedAnimPlaying(size_t clipId) const
 {
-	return clipId < static_cast<uint32_t>(animPlayers.size()) && animPlayers[clipId].isActive;
+	return clipId < static_cast<size_t>(animPlayers.size()) && animPlayers[clipId].isActive;
 }
 
-uint32_t CUnitScript::GetEmbeddedAnimId(const std::string& name) const
+size_t CUnitScript::GetEmbeddedAnimId(const std::string& name) const
 {
 	return unit->model->animationMap.GetAnimationId(name);
 }
 
-void CUnitScript::SetEmbeddedAnimPieceWeights(uint32_t clipId, const std::vector<float>& weights)
+void CUnitScript::SetEmbeddedAnimPieceWeights(size_t clipId, const std::vector<float>& weights)
 {
-	if (clipId < static_cast<uint32_t>(animPlayers.size()) && animPlayers[clipId].isActive)
+	if (clipId < static_cast<size_t>(animPlayers.size()) && animPlayers[clipId].isActive)
 		animPlayers[clipId].pieceWeights = weights;
 }
 

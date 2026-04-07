@@ -577,7 +577,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 
 	// load all animations
 	for (const auto& animation : asset.animations) {
-		const uint32_t animId = model.animationMap.GetOrAddAnimation(std::string(animation.name));
+		const size_t animId = model.animationMap.GetOrAddAnimation(std::string(animation.name));
 		for (const auto& channel : animation.channels) {
 			if (!channel.nodeIndex.has_value())
 				continue;
@@ -635,7 +635,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 			}
 		}
 	}
-	model.animationMap.RemoveEmptyAnimations();
+	model.animationMap.FinalizeAnimations();
 
 	// will also calculate pieces / model bounding box
 	ModelUtils::ApplyModelProperties(&model, optionalModelParams);

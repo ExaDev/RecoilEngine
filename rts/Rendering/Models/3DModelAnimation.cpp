@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cassert>
 
-void ModelAnimation::Map::RemoveEmptyAnimations()
+void ModelAnimation::Map::FinalizeAnimations()
 {
 	const auto IsEmptySequence = [](ModelAnimation::Sequence& seq) {
 		static const auto IsEmpty = []<typename T>(const ModelAnimation::TypedSequence<T>& ts) {
