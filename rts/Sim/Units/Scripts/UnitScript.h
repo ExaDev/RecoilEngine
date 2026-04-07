@@ -10,9 +10,8 @@
 #include <cstdint>
 
 #include "Rendering/Models/LocalModelPiece.hpp"
-#include "System/creg/creg_cond.h"
-#include "System/FreeListMap.h"
 #include "Rendering/Models/3DModelAnimation.hpp"
+#include "System/creg/creg_cond.h"
 
 
 class CUnit;
@@ -48,14 +47,13 @@ protected:
 		bool hasWaiting = false;
 	};
 
-	using AnimContainerType = std::vector<AnimInfo>;
-	using AnimContainerTypeIt = AnimContainerType::iterator;
+	using AnimContainerTypeIt = std::vector<AnimInfo>::iterator;
 
 	using TickAnimFunc = bool(CUnitScript::*)(int, LocalModelPiece&, AnimInfo&);
 
-	AnimContainerType anims;
-	AnimContainerType doneAnims;
-	std::vector<std::pair<uint32_t, std::string>> doneEmbeddedAnims;
+	std::vector<AnimInfo> anims;
+	std::vector<AnimInfo> doneAnims;
+	std::vector<uint32_t> doneEmbeddedAnims;
 
 	struct EmbeddedPieceState {
 		float3 pos;
@@ -66,17 +64,16 @@ protected:
 
 	struct EmbeddedAnimPlayer {
 		CR_DECLARE_STRUCT(EmbeddedAnimPlayer)
-		std::string animName;
-		float currentTime        = 0.0f;
-		float playSpeed          = 1.0f;
-		float duration           = 0.0f;
-		float weight             = 1.0f;
-		bool  isPlaying          = false;
-		bool  isLooping          = true;
-		bool  hasWaiting         = false;  // opt-in to EmbeddedAnimFinished callback
-		bool  hasFiredCompletion = false;  // fire-once guard
+		float currentTime           = 0.0f;
+		float playSpeed             = 1.0f;
+		float weight                = 1.0f;
+		bool  isActive              = false;
+		bool  isLooping             = true;
+		bool  hasWaiting            = false;  // opt-in to EmbeddedAnimFinished callback
+		bool  hasFiredCompletion    = false;  // guards re-fire on non-looping hold
 	};
-	spring::FreeListMap<EmbeddedAnimPlayer> embeddedAnims;
+
+	std::vector<EmbeddedAnimPlayer> animPlayers;
 
 	bool busy;
 	bool hasSetSFXOccupy;
@@ -152,17 +149,19 @@ public:
 	void TickEmbeddedAnim(int tickRate);
 
 	// animation, used by Lua unit scripts
-	unsigned int PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight, bool wait = false);
-	void StopEmbeddedAnimation(unsigned int id);
-	void StopEmbeddedAnimationByString(const std::string& name);
+	uint32_t PlayEmbeddedAnimation(const std::string& name, float speed, bool loop, float weight, bool wait = false);
+	void StopEmbeddedAnimation(uint32_t clipId);
 	void StopEmbeddedAnimations();
 
-	void  SetEmbeddedAnimSpeed(unsigned int id, float speed);
-	void  SetEmbeddedAnimTime(unsigned int id, float time);
-	void  SetEmbeddedAnimWeight(unsigned int id, float weight);
-	float GetEmbeddedAnimTime(unsigned int id)  const;
+	void  SetEmbeddedAnimSpeed(uint32_t clipId, float speed);
+	void  SetEmbeddedAnimTime(uint32_t clipId, float time);
+	void  SetEmbeddedAnimWeight(uint32_t clipId, float weight);
+	float GetEmbeddedAnimTime(uint32_t clipId)  const;
 	float GetEmbeddedAnimDuration(const std::string& name) const;
-	bool  IsEmbeddedAnimPlaying(const std::string& name) const;
+	float GetEmbeddedAnimDuration(uint32_t clipId)         const;
+	bool  IsEmbeddedAnimPlaying(const std::string& name)   const;
+	bool  IsEmbeddedAnimPlaying(uint32_t clipId)           const;
+	uint32_t GetEmbeddedAnimId(const std::string& name)    const;
 
 	// animation, used by CCobThread
 	void RestorePieceTurn(int piece, int axis, float speed);
@@ -198,9 +197,8 @@ public:
 	bool IsInAnimation(AnimType type, int piece, int axis) {
 		return (FindAnim(type, piece, axis) != anims.end());
 	}
-	bool HaveAnimations() const {
-		return (!anims.empty() || !embeddedAnims.empty());
-	}
+
+	bool HaveAnimations() const;
 
 	// checks for callin existence
 	bool HasSetSFXOccupy () const { return hasSetSFXOccupy; }
@@ -265,6 +263,9 @@ public:
 public:
 	const auto& GetLiveAnims() const { return anims; }
 	const auto& GetDoneAnims() const { return doneAnims; }
+
+	const auto& GetAnimPlayers() const { return animPlayers; }
+	const auto& GetDoneEmbeddedAnims() const { return doneEmbeddedAnims; }
 };
 
 #endif // UNIT_SCRIPT_H

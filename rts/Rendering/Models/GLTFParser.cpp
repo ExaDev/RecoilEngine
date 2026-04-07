@@ -521,7 +521,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 
 	// load all animations
 	for (const auto& animation : asset.animations) {
-		auto animIt = model.animationMap.GetNamedAnimationIterator(std::string(animation.name));
+		const uint32_t animId = model.animationMap.GetOrAddAnimation(std::string(animation.name));
 		for (const auto& channel : animation.channels) {
 			if (!channel.nodeIndex.has_value())
 				continue;
@@ -543,7 +543,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 			switch (channel.path)
 			{
 			case fastgltf::AnimationPath::Translation: {
-				auto& animVectors = model.animationMap.GetPieceAnimationVectors<float3>(animIt, pieceIdxIt->second);
+				auto& animVectors = model.animationMap.GetPieceAnimationVectors<float3>(animId, pieceIdxIt->second);
 				fastgltf::iterateAccessorWithIndex<float>(asset, inputAccessor, [&](const auto& val, std::size_t idx) {
 					animVectors.timeFrames.emplace_back(val);
 				});
@@ -552,7 +552,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 				});
 			} break;
 			case fastgltf::AnimationPath::Rotation: {
-				auto& animVectors = model.animationMap.GetPieceAnimationVectors<CQuaternion>(animIt, pieceIdxIt->second);
+				auto& animVectors = model.animationMap.GetPieceAnimationVectors<CQuaternion>(animId, pieceIdxIt->second);
 				fastgltf::iterateAccessorWithIndex<float>(asset, inputAccessor, [&](const auto& val, std::size_t idx) {
 					animVectors.timeFrames.emplace_back(val);
 				});
@@ -561,7 +561,7 @@ void CGLTFParser::Load(S3DModel& model, const std::string& modelFilePath)
 				});
 			} break;
 			case fastgltf::AnimationPath::Scale: {
-				auto& animVectors = model.animationMap.GetPieceAnimationVectors<float>(animIt, pieceIdxIt->second);
+				auto& animVectors = model.animationMap.GetPieceAnimationVectors<float>(animId, pieceIdxIt->second);
 				fastgltf::iterateAccessorWithIndex<float>(asset, inputAccessor, [&](const auto& val, std::size_t idx) {
 					animVectors.timeFrames.emplace_back(val);
 				});

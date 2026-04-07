@@ -1,12 +1,11 @@
 #pragma once
 
-#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <tuple>
 #include <vector>
+#include <algorithm>
 
-#include "System/BranchPrediction.h"
 #include "System/UnorderedMap.hpp"
 #include "System/float3.h"
 #include "System/Quaternion.h"
@@ -25,59 +24,92 @@ namespace ModelAnimation {
 	>;
 
 	using PieceInfoDataMap = spring::unordered_map<size_t, Sequence>;
-	using MapType = spring::unordered_map<std::string, PieceInfoDataMap>;
+
+	struct AnimationEntry {
+		std::string      name;
+		float            duration = 0.0f;
+		PieceInfoDataMap pieceData;
+	};
 
 	class Map {
 	public:
-		auto GetNamedAnimationIterator(const std::string& animName) {
-			auto it = animationMap.find(animName);
-			if likely(it == animationMap.end())
-				it = animationMap.emplace(animName, {}).first;
+		uint32_t GetOrAddAnimation(const std::string& name) {
+			auto it = std::find_if(animationMap.begin(), animationMap.end(), [&name](const AnimationEntry& entry) { return entry.name == name; });
 
-			return it;
+			if (it != animationMap.end())
+				return std::distance(animationMap.begin(), it);
+
+			const uint32_t id = static_cast<uint32_t>(animationMap.size());
+			animationMap.emplace_back(name, 0.0f, PieceInfoDataMap{});
+			return id;
 		}
-
-		auto GetNamedAnimationIterator(const std::string& animName) const {
-			return animationMap.find(animName);
-		}
-
 		template<typename T>
-		decltype(auto) GetPieceAnimationVectors(MapType::iterator animMapIt, size_t animPieceIdx) {
-			assert(animMapIt != animationMap.end());
-			return std::get<TypedSequence<T>>(animMapIt->second[animPieceIdx]);
+		TypedSequence<T>& GetPieceAnimationVectors(uint32_t id, size_t pieceIdx) {
+			assert(id < static_cast<uint32_t>(animationMap.size()));
+			return std::get<TypedSequence<T>>(animationMap[id].pieceData[pieceIdx]);
 		}
 
+		// --- Runtime API ---
+
+		// Const access to piece sequences for sampling. Returns nullptr if not found.
 		template<typename T>
-		const TypedSequence<T>* GetPieceAnimationVectors(MapType::const_iterator animMapIt, size_t animPieceIdx) const {
-			if (animMapIt == animationMap.end())
+		const TypedSequence<T>* GetPieceAnimationVectors(uint32_t id, size_t pieceIdx) const {
+			if (id >= static_cast<uint32_t>(animationMap.size()))
 				return nullptr;
-
-			auto pieceAnimMapIt = animMapIt->second.find(animPieceIdx);
-			if (pieceAnimMapIt == animMapIt->second.end())
+			auto pieceIt = animationMap[id].pieceData.find(pieceIdx);
+			if (pieceIt == animationMap[id].pieceData.end())
 				return nullptr;
-
-			return &std::get<TypedSequence<T>>(pieceAnimMapIt->second);
+			return &std::get<TypedSequence<T>>(pieceIt->second);
 		}
 
+		// Removes animations/sequences whose data is all-default, compacts the vector,
 		void RemoveEmptyAnimations();
 
-		bool HasAnimation(const std::string& name) const {
-			return animationMap.find(name) != animationMap.end();
+		// Returns clip ID, or uint32_t(-1) if not found.
+		uint32_t GetAnimationId(const std::string& name) const {
+			auto it = std::find_if(animationMap.begin(), animationMap.end(), [&name](const AnimationEntry& entry) { return entry.name == name; });
+			return (it != animationMap.end()) ? std::distance(animationMap.begin(), it) : static_cast<uint32_t>(-1);
 		}
 
-		// Returns the duration (seconds) of the named animation, or 0.0 if not found.
-		float GetAnimationDuration(const std::string& name) const;
+		const std::string& GetAnimationName(uint32_t id) const {
+			return animationMap[id].name;
+		}
 
-		MapType::const_iterator cbegin() const { return animationMap.cbegin(); }
-		MapType::const_iterator cend() const { return animationMap.cend(); }
+		bool HasAnimation(const std::string& name) const {
+			auto it = std::find_if(animationMap.begin(), animationMap.end(), [&name](const AnimationEntry& entry) { return entry.name == name; });
+			return it != animationMap.end();
+		}
+
+		bool HasAnimation(uint32_t id) const {
+			return id < static_cast<uint32_t>(animationMap.size());
+		}
+
+		float GetAnimationDuration(const std::string& name) const {
+			const uint32_t id = GetAnimationId(name);
+			return (id != static_cast<uint32_t>(-1)) ? animationMap[id].duration : 0.0f;
+		}
+
+		float GetAnimationDuration(uint32_t id) const {
+			return HasAnimation(id) ? animationMap[id].duration : 0.0f;
+		}
+
+		AnimationEntry& operator[](uint32_t id) {
+			return animationMap[id];
+		}
+
+		const AnimationEntry& operator[](uint32_t id) const {
+			return animationMap[id];
+		}
+
+		auto cbegin() const { return animationMap.cbegin(); }
+		auto   cend() const { return animationMap.cend(); }
 		size_t size() const { return animationMap.size(); }
+		bool  empty() const { return animationMap.empty(); }
+
 	private:
-		MapType animationMap;
+		std::vector<AnimationEntry> animationMap;
 	};
 
-	// Sample a keyframe sequence at the given time using linear interpolation (SLERP for quaternions).
-	// Returns the default value for the type if the sequence is empty.
-	// Time is clamped to [first, last] keyframe (no looping — caller handles that).
 	template<typename T>
 	T SampleSequence(const TypedSequence<T>& seq, float time);
 }

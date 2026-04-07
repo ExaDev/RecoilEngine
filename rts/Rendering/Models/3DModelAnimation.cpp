@@ -6,11 +6,11 @@
 void ModelAnimation::Map::RemoveEmptyAnimations()
 {
 	const auto IsEmptySequence = [](ModelAnimation::Sequence& seq) {
-		static const auto IsEmpty = []<typename T>(const ModelAnimation::TypedSequence<T>&ts) {
+		static const auto IsEmpty = []<typename T>(const ModelAnimation::TypedSequence<T>& ts) {
 			return ts.timeFrames.empty();
 		};
 
-		static const auto RemoveDefault = []<typename T>(ModelAnimation::TypedSequence<T>&ts) -> void {
+		static const auto RemoveDefault = []<typename T>(ModelAnimation::TypedSequence<T>& ts) -> void {
 			if constexpr (std::is_same_v<T, float3>) {
 				static constexpr auto def = float3();
 				if (std::all_of(ts.values.begin(), ts.values.end(), [](const auto& val) { return val == def; })) {
@@ -43,43 +43,30 @@ void ModelAnimation::Map::RemoveEmptyAnimations()
 		}, seq);
 	};
 
-	for (auto animMapIt = animationMap.begin(); animMapIt != animationMap.end(); /*NOOP*/) {
-		for (auto pieceAnimMapIt = animMapIt->second.begin(); pieceAnimMapIt != animMapIt->second.end(); /*NOOP*/) {
-			if (IsEmptySequence(pieceAnimMapIt->second))
-				pieceAnimMapIt = animMapIt->second.erase(pieceAnimMapIt);
+	for (auto& entry : animationMap) {
+		for (auto it = entry.pieceData.begin(); it != entry.pieceData.end(); ) {
+			if (IsEmptySequence(it->second))
+				it = entry.pieceData.erase(it);
 			else
-				pieceAnimMapIt++;
+				++it;
 		}
+	}
 
-		// check if it has no pieces
-		if (animMapIt->second.empty())
-			animMapIt = animationMap.erase(animMapIt);
-		else
-			animMapIt++;
+	animationMap.erase(
+		std::remove_if(animationMap.begin(), animationMap.end(), [](const AnimationEntry& e) { return e.pieceData.empty(); }), animationMap.end()
+	);
+
+	for (auto& entry : animationMap) {
+		entry.duration = 0.0f;
+		for (const auto& [pieceIdx, seq] : entry.pieceData) {
+			const auto& [tSeq, rSeq, sSeq] = seq;
+			if (!tSeq.timeFrames.empty()) entry.duration = std::max(entry.duration, tSeq.timeFrames.back());
+			if (!rSeq.timeFrames.empty()) entry.duration = std::max(entry.duration, rSeq.timeFrames.back());
+			if (!sSeq.timeFrames.empty()) entry.duration = std::max(entry.duration, sSeq.timeFrames.back());
+		}
 	}
 }
 
-
-float ModelAnimation::Map::GetAnimationDuration(const std::string& name) const
-{
-	auto animIt = animationMap.find(name);
-	if (animIt == animationMap.end())
-		return 0.0f;
-
-	float dur = 0.0f;
-	for (const auto& [pieceIdx, seq] : animIt->second) {
-		const auto& [tSeq, rSeq, sSeq] = seq;
-		if (!tSeq.timeFrames.empty()) dur = std::max(dur, tSeq.timeFrames.back());
-		if (!rSeq.timeFrames.empty()) dur = std::max(dur, rSeq.timeFrames.back());
-		if (!sSeq.timeFrames.empty()) dur = std::max(dur, sSeq.timeFrames.back());
-	}
-	return dur;
-}
-
-
-// Helper: find the lower-bound bracket index for binary search in timeFrames.
-// Returns the index i such that timeFrames[i] <= time < timeFrames[i+1].
-// Clamps to valid range.
 static size_t FindKeyframeBracket(const std::vector<float>& timeFrames, float time)
 {
 	assert(!timeFrames.empty());

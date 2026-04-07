@@ -207,7 +207,10 @@ private:
 	static int SetAnimationWeight(lua_State* L);
 	static int GetAnimationTime(lua_State* L);
 	static int GetAnimationDuration(lua_State* L);
+	static int GetAnimationId(lua_State* L);
 	static int IsAnimationPlaying(lua_State* L);
+	// Helper function to read animation id from lua state
+	static int ReadAnimationId(lua_State* L);
 };
 
 #endif

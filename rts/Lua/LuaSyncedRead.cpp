@@ -5897,7 +5897,7 @@ int LuaSyncedRead::GetUnitDefAnimationNames(lua_State* L)
 
 	size_t i = 0;
 	for (auto it = animMap.cbegin(); it != animMap.cend(); ++it, ++i) {
-		lua_pushsstring(L, it->first);
+		lua_pushsstring(L, it->name);
 		lua_rawseti(L, -2, i + 1);
 	}
 
