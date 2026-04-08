@@ -1,7 +1,8 @@
 name: Claude Issue Triage
 on:
-  issues:
-    types: [opened]
+# Commenting out for now, going to spot check a few issues first before turning it on for all new ones.
+#  issues:
+#    types: [opened]
   issue_comment:
     types: [created]
 
