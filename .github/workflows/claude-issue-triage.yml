@@ -43,7 +43,7 @@ jobs:
             ISSUE_NUMBER: ${{ github.event.issue.number }}
 
             TOOLS:
-            - github cli `gh` - the min way you'll interact with issues
+            - github cli `gh` - the main way you'll interact with issues
               - `gh label list --limit 100` — fetch with limit
               - `gh issue view 123` — read issue title, body, and labels
               - `gh issue view 123 --comments` — read the conversation
