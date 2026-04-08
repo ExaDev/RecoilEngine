@@ -54,7 +54,7 @@ jobs:
             2. Run `gh issue view ISSUE_NUMBER` to read the issue details.
             3. Run `gh issue view ISSUE_NUMBER --comments` to read the conversation.
 
-            4. Analyze and decide on which category labels are applicable:
+            4. Analyze and decide on which _objective_ category labels are applicable:
               - Type (bug, enhancement, refactor, question, etc.)
               - Technical areas (Lua API, Graphics, Pathfinding, etc.)
               - Platform (arm64, amd64, etc.)
@@ -65,5 +65,6 @@ jobs:
             GUIDELINES:
             - ONLY use labels from `gh label list` — never create or guess label names
             - DO NOT post any comments to the issue
+            - Focus on objective labels, like type or area. IGNORE any subjective labels like "good first issue" or status.
             - When in doubt, don't apply a label — false positives are worse than missing labels
             - It's okay to not add any labels if none are clearly applicable
