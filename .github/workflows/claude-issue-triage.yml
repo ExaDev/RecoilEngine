@@ -65,6 +65,6 @@ jobs:
             GUIDELINES:
             - ONLY use labels from `gh label list` — never create or guess label names
             - DO NOT post any comments to the issue
-            - Focus on objective labels, like type or area. IGNORE any subjective labels like "good first issue" or status.
+            - Focus on objective labels, like type or area. IGNORE any subjective labels like "good first issue" or lifecycle labels like status.
             - When in doubt, don't apply a label — false positives are worse than missing labels
             - It's okay to not add any labels if none are clearly applicable
