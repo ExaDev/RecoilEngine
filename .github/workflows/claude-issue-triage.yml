@@ -60,7 +60,7 @@ jobs:
               - Technical areas (Lua API, Graphics, Pathfinding, etc.)
               - Platform (arm64, amd64, etc.)
 
-            7. Apply all selected labels:
+            5. Apply all selected labels:
               `gh issue edit ISSUE_NUMBER --add-label LABEL1 --add-label LABEL2 ...`
             
             GUIDELINES:
