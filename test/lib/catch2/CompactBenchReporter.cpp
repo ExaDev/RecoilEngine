@@ -47,8 +47,14 @@ public:
 		if (m_sectionStack.size() <= 1)
 			return;
 
-		// Section header: ── TestCase / Section ──────────────
-		const std::string title = currentTestCase + " / " + info.name;
+		// Build title from full section stack path beyond the root:
+		//   Single-level:  "Map<int,int> / 90% find / 10% mutate"
+		//   Nested:        "Map<int,int> / 90% find / 10% mutate / std"
+		std::string title = currentTestCase;
+		for (size_t i = 1; i < m_sectionStack.size(); ++i)
+			title += " / " + static_cast<std::string>(m_sectionStack[i].name);
+		title += " / " + static_cast<std::string>(info.name);
+
 		m_stream << "\n"
 		         << "\xe2\x94\x80\xe2\x94\x80 " << title << " ";
 

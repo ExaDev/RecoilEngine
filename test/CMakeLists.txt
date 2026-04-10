@@ -553,6 +553,20 @@ endif()
 	set(test_src
 			"${CMAKE_CURRENT_SOURCE_DIR}/other/testHashMapBenchmark.cpp"
 			"${CMAKE_CURRENT_SOURCE_DIR}/lib/catch2/CompactBenchReporter.cpp"
+			"${CMAKE_CURRENT_SOURCE_DIR}/lib/catch2/CsvBenchReporter.cpp"
+			${test_Common_sources}
+		)
+	set(test_libs "")
+	set(test_flags "-DNOT_USING_CREG -DNOT_USING_STREFLOP -DBUILDING_AI")
+	add_spring_test(${test_name} "${test_src}" "${test_libs}" "${test_flags}")
+
+################################################################################
+### HashMapScalingBenchmark
+	set(test_name HashMapScalingBenchmark)
+	set(test_src
+			"${CMAKE_CURRENT_SOURCE_DIR}/other/testHashMapScalingBenchmark.cpp"
+			"${CMAKE_CURRENT_SOURCE_DIR}/lib/catch2/CompactBenchReporter.cpp"
+			"${CMAKE_CURRENT_SOURCE_DIR}/lib/catch2/CsvBenchReporter.cpp"
 			${test_Common_sources}
 		)
 	set(test_libs "")

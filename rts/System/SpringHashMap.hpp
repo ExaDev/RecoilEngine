@@ -207,7 +207,7 @@ public:
 	HashMap& operator=(const HashMap& other)
 	{
 		clear();
-		reserve(other.size());
+		reserve(other.size()); // this should be the internal length not the size()... right?
 		insert(other.cbegin(), other.cend());
 		return *this;
 	}
@@ -490,7 +490,7 @@ public:
 	// Make room for this many elements
 	void reserve(size_t num_elems)
 	{
-		size_t required_buckets = num_elems + num_elems/2 + 1;
+		size_t required_buckets = num_elems + num_elems/2 + 1; // load factor of 0.66
 		if (required_buckets <= _num_buckets) {
 			return;
 		}
