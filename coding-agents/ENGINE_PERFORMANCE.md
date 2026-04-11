@@ -10,21 +10,24 @@ Recoil is an RTS engine built for large-scale games — designed to handle thous
 
 ## Sim, draw, and update frames
 
-A main-loop iteration contains any pending **sim frames** followed by exactly one **draw frame**. `CGame::Update` runs first (synced) and dispatches `SimFrame()`s as network packets arrive; then `CGame::Draw` produces the iteration's draw frame — an **update phase** (`CGame::UpdateUnsynced` — timings, interpolation, camera, GUI, sound, world-drawer prep), then rendering the world and screen. It's all one thread — sim and rendering are **not concurrent**; parallelism only happens *inside* a phase.
+A main-loop iteration contains any pending **sim frames** followed by exactly one **draw frame**. `CGame::Update` runs first (synced) and dispatches `SimFrame()`s as network packets arrive; then `CGame::Draw` produces the iteration's draw frame — first an **update phase** (`CGame::UpdateUnsynced`: timings, interpolation, camera, GUI, sound, world-drawer prep), then **rendering** the world and screen (`DrawGenesis` → `DrawScreenPost`). It's all one thread — sim and rendering are **not concurrent**; parallelism only happens *inside* a phase.
 
 ```
 main-loop iteration
 ├── CGame::Update       (synced plumbing)
 │   └── SimFrame × 0..N  ← 0..N "sim frames" (30 Hz, deterministic)
 └── CGame::Draw         ← one "draw frame" (unsynced)
-    ├── UpdateUnsynced  (update phase)
-    └── render world + screen
+    ├── UpdateUnsynced         (update phase; ends at DrawGenesis)
+    └── render world + screen  (DrawGenesis → DrawScreenPost)
 ```
 
-| Frame | Rate | Synced? | Responsibility |
+| Phase | Rate | Synced? | Responsibility |
 |---|---|---|---|
 | **Sim frame** — `CGame::SimFrame` | fixed 30 Hz (`GAME_SPEED`) | yes | advance deterministic state: units, pathing, projectiles, line-of-sight, scripts, Lua `GameFrame` |
-| **Draw frame** — `CGame::Draw` | variable | no | update phase + render world/screen |
+| **Draw frame** — `CGame::Draw` | variable | no | update phase (see below) + render world/screen |
+| **Update phase** — `CGame::UpdateUnsynced` *(inside draw frame)* | per draw frame | no | timings, interpolation, camera, GUI, sound, world-drawer prep |
+
+**Benchmark names.** `fightertest` reports these phases as three peer buckets **Sim / Update / Render** — Sim ≈ `CGame::SimFrame`, Update ≈ `CGame::UpdateUnsynced`, Render ≈ `DrawGenesis` → `DrawScreenPost`.
 
 ### Scheduling and CPU budget
 
