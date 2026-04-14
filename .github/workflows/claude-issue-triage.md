@@ -1,4 +1,18 @@
 ---
+# This workflow uses GitHub Agentic Workflows (gh-aw) rather than the bare
+# anthropics/claude-code-action. Rationale:
+#   - Safe-outputs: the agent job runs read-only; label writes happen in a
+#     separate privileged job with a narrow, validated interface (blocked-list
+#     globs, max-label cap). The agent can't forge arbitrary mutations even
+#     if prompt-injected.
+#   - Sanitization + untrusted-content framing: gh-aw treats issue/comment
+#     bodies as untrusted by default and structures the prompt accordingly.
+#     Though, we don't get sanitization when we have to read the full issue.
+#   - Tool allowlist: the compiled .lock.yml pins a minimal set of MCP/bash
+#     tools the agent can use, reviewed in PR.
+# Source: .github/workflows/claude-issue-triage.md  (edit this, not .lock.yml)
+# Compiled: .github/workflows/claude-issue-triage.lock.yml  (via `gh aw compile`)
+
 on:
   slash_command:
     name: claude-triage
