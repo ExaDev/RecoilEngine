@@ -111,19 +111,27 @@ endforeach()
 ADD_SUBDIRECTORY(assimp)
 target_compile_definitions(assimp PRIVATE -DASSIMP_BUILD_NO_OWN_ZLIB)
 
-# Suppress clang warnings-as-errors in vendored assimp (ASSIMP_WERROR=ON).
+# Suppress warnings-as-errors in vendored assimp (ASSIMP_WERROR=ON).
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-	set(_assimp_clang_warns
+	set(_assimp_warns
 		-Wno-pragma-pack
 		-Wno-ordered-compare-function-pointers
 		-Wno-deprecated-declarations
 		-Wno-tautological-bitwise-compare
 		-Wno-unused-but-set-variable
 	)
-	target_compile_options(assimp PRIVATE ${_assimp_clang_warns})
+	target_compile_options(assimp PRIVATE ${_assimp_warns})
 	if (TARGET IrrXML)
 		target_compile_options(IrrXML PRIVATE -Wno-pragma-pack)
 	endif()
+elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+	set(_assimp_warns
+		-Wno-class-memaccess
+		-Wno-deprecated-declarations
+		-Wno-tautological-compare
+		-Wno-maybe-uninitialized
+	)
+	target_compile_options(assimp PRIVATE ${_assimp_warns})
 endif()
 
 # simdjson, a fastgltf dependency (manually added to submodules to work around the build system limitations)
@@ -190,3 +198,6 @@ add_subdirectory(lunasvg)
 set(CMAKE_CXX_FLAGS ${SAVED_CMAKE_FLAGS})
 
 add_subdirectory(RmlUi)
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND TARGET rmlui_core)
+	target_compile_options(rmlui_core PRIVATE -Wno-array-bounds)
+endif()

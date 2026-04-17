@@ -111,11 +111,23 @@ void CSMFGroundTextures::LoadTiles(CSMFMapFile& file)
 		std::string err = fmt::sprintf("[SMFGroundTextures::%s] smfMap->tileCount=%d <= 0", __func__, smfMap->tileCount);
 		throw content_error(err);
 	}
+	if (tileHeader.numTiles <= 0) {
+		std::string err = fmt::sprintf("[SMFGroundTextures::%s] tileHeader.numTiles=%d <= 0", __func__, tileHeader.numTiles);
+		throw content_error(err);
+	}
 
 	tileMap.clear();
 	tileMap.resize(smfMap->tileCount);
 	tiles.clear();
-	tiles.resize(tileHeader.numTiles * SMALL_TILE_SIZE);
+	// GCC 13 emits a spurious -Wstringop-overflow on this resize.
+#if defined(__GNUC__) && !defined(__clang__)
+	#pragma GCC diagnostic push
+	#pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
+	tiles.resize(static_cast<size_t>(tileHeader.numTiles) * SMALL_TILE_SIZE);
+#if defined(__GNUC__) && !defined(__clang__)
+	#pragma GCC diagnostic pop
+#endif
 	squares.clear();
 	squares.resize(smfMap->numBigTexX * smfMap->numBigTexY);
 

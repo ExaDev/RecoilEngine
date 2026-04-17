@@ -34,15 +34,21 @@ set(_skirmish_ai_clang_warns
 	-Wno-vla-cxx-extension
 	-Wno-unused-variable
 )
+set(_skirmish_ai_gcc_warns
+	-Wno-maybe-uninitialized
+	-Wno-deprecated-declarations
+)
 foreach    (skirmishAIDir ${SKIRMISH_AI_DIRS})
 	add_subdirectory(${skirmishAIDir})
 	if (TARGET ${skirmishAIDir})
 		list(APPEND DEPS_AI_SKIRMISH ${skirmishAIDir})
 		# Vendored Skirmish AI submodules (e.g. BARb, CircuitAI) don't compile
-		# cleanly under clang-19; suppress the warnings here rather than patching
-		# the submodule CMakeLists.
+		# cleanly under modern compilers; suppress the warnings here rather
+		# than patching the submodule CMakeLists.
 		if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 			target_compile_options(${skirmishAIDir} PRIVATE ${_skirmish_ai_clang_warns})
+		elseif (CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+			target_compile_options(${skirmishAIDir} PRIVATE ${_skirmish_ai_gcc_warns})
 		endif()
 	endif()
 endforeach (skirmishAIDir)
