@@ -414,13 +414,10 @@ if(NOT MSVC)
 		## [[nodiscard]] constexpr uint32_t operator"" _hs(const char* str, std::size_t) noexcept
 		## it's been quite annoying since we switched to C++23
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-literal-operator")
-		## std::aligned_storage_t is deprecated in C++23 and used by vendored entt headers
+		## libstdc++13 <functional> still uses std::result_of (deprecated in C++23),
+		## which trips through any ThreadPool::Enqueue callsite — suppress globally
+		## rather than sprinkle pragmas across every file that enqueues work.
 		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations")
-		## CR_DECLARE_STRUCT in templates triggers this; the static is defined by a
-		## matching CR_BIND_TEMPLATE in the TU that needs it
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-undefined-var-template")
-		## vendored assimp public headers use #pragma pack in ways clang dislikes
-		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-pragma-pack")
 	endif()
 
 	### CompileTime Warnings
