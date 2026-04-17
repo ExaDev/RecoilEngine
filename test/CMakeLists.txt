@@ -17,7 +17,7 @@ ADD_SUBDIRECTORY(lib/catch2)
 # Engine-wide -fsingle-precision-constant (gcc) makes `0.` a float, which
 # triggers an ISO ambiguity error against Catch2's float/double overloads.
 # Build the vendored Catch2 without that flag.
-if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 	target_compile_options(Catch2 PRIVATE -fno-single-precision-constant)
 endif()
 

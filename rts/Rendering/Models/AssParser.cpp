@@ -626,10 +626,11 @@ void CAssParser::Load(S3DModel& model, const std::string& modelFilePath)
 				/* Try to salvage the model since such "invalid" ones can actually be
 				 * produced by industry standard tools (in particular, Blender). */
 				meshNode = Impl::FindFallbackNode(scene);
-				if (meshNode && meshNode->mParent)
+				if (meshNode && meshNode->mParent) {
 					LOG_SL(LOG_SECTION_MODEL, L_WARNING, "Found a likely replacement candidate for mesh \"%s\" - node \"%s\". It might be incorrect!", meshName.c_str(), meshNode->mName.data);
-				else
+				} else {
 					throw content_error("An assimp model has invalid pieces hierarchy. Failed to find suitable replacement.");
+				}
 			}
 
 			std::string const parentName(meshNode->mParent->mName.C_Str());
