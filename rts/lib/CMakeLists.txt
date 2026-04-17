@@ -111,6 +111,21 @@ endforeach()
 ADD_SUBDIRECTORY(assimp)
 target_compile_definitions(assimp PRIVATE -DASSIMP_BUILD_NO_OWN_ZLIB)
 
+# Suppress clang warnings-as-errors in vendored assimp (ASSIMP_WERROR=ON).
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+	set(_assimp_clang_warns
+		-Wno-pragma-pack
+		-Wno-ordered-compare-function-pointers
+		-Wno-deprecated-declarations
+		-Wno-tautological-bitwise-compare
+		-Wno-unused-but-set-variable
+	)
+	target_compile_options(assimp PRIVATE ${_assimp_clang_warns})
+	if (TARGET IrrXML)
+		target_compile_options(IrrXML PRIVATE -Wno-pragma-pack)
+	endif()
+endif()
+
 # simdjson, a fastgltf dependency (manually added to submodules to work around the build system limitations)
 set(SIMDJSON_AVX512_ALLOWED OFF CACHE BOOL "forced by Recoil build env" FORCE)
 set(SIMDJSON_BASH OFF CACHE BOOL "forced by Recoil build env" FORCE)
@@ -135,6 +150,9 @@ ADD_SUBDIRECTORY(fastgltf)
 
 ADD_SUBDIRECTORY(squish)
 ADD_SUBDIRECTORY(rg-etc1)
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+	target_compile_options(rgetc1 PRIVATE -Wno-absolute-value -Wno-unused-value)
+endif()
 
 option(TRACY_ENABLE "Enable tracy profiling" OFF)
 
