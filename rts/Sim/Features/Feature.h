@@ -22,7 +22,7 @@ class DamageArray;
 
 class CFeature: public CSolidObject, public spring::noncopyable
 {
-	CR_DECLARE(CFeature)
+	CR_DECLARE_DERIVED(CFeature)
 
 public:
 	CFeature();
