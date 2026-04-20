@@ -14,7 +14,8 @@
 CR_BIND(CCobEngine, )
 
 CR_REG_METADATA(CCobEngine, (
-	CR_MEMBER(threadInstances),
+	CR_MEMBER(threadSlots),
+	CR_MEMBER(freeSlots),
 	CR_MEMBER(tickAddedThreads),
 	CR_MEMBER(tickRemovedThreads),
 	CR_MEMBER(runningThreadIDs),
@@ -25,8 +26,7 @@ CR_REG_METADATA(CCobEngine, (
 	CR_IGNORED(curThread),
 	CR_IGNORED(deferredCallins),
 
-	CR_MEMBER(currentTime),
-	CR_MEMBER(threadCounter)
+	CR_MEMBER(currentTime)
 ))
 
 CR_BIND(CCobEngine::SleepingThread, )
@@ -35,37 +35,102 @@ CR_REG_METADATA(CCobEngine::SleepingThread, (
 	CR_MEMBER(wt)
 ))
 
+CR_BIND(CCobEngine::ThreadSlot, )
+CR_REG_METADATA(CCobEngine::ThreadSlot, (
+	CR_MEMBER(thread),
+	CR_MEMBER(generation),
+	CR_MEMBER(occupied)
+))
+
 static const char* const numCobThreadsPlot = "CobThreads";
 
-int CCobEngine::AddThread(CCobThread&& thread)
+CobThreadID CCobEngine::GenThreadID()
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (thread.GetID() == -1)
-		thread.SetID(GenThreadID());
+	uint32_t idx;
 
-	CCobInstance* o = thread.cobInst;
-	CCobThread& t = threadInstances[thread.GetID()];
-
-	// move thread into registry, hand its ID to owner
-	t = std::move(thread);
-	o->AddThreadID(t.GetID());
-
-	TracyPlot(numCobThreadsPlot, static_cast<int64_t>(threadInstances.size()));
-
-	return (t.GetID());
-}
-
-bool CCobEngine::RemoveThread(int threadID) {
-	RECOIL_DETAILED_TRACY_ZONE;
-	const auto it = threadInstances.find(threadID);
-
-	if (it != threadInstances.end()) {
-		threadInstances.erase(it);
-		TracyPlot(numCobThreadsPlot, static_cast<int64_t>(threadInstances.size()));
-		return true;
+	if (!freeSlots.empty()) {
+		idx = freeSlots.back();
+		freeSlots.pop_back();
+		ThreadSlot& s = threadSlots[idx];
+		// Bump generation; skip 0 on wrap so a default-initialized slot
+		// (gen=0, occupied=false) never validates any real id.
+		s.generation = s.generation + 1u;
+		if (s.generation == 0u)
+			s.generation = 1u;
+		s.occupied = true;
+	} else {
+		idx = static_cast<uint32_t>(threadSlots.size());
+		threadSlots.emplace_back();
+		ThreadSlot& s = threadSlots[idx];
+		s.generation = 1u;
+		s.occupied = true;
 	}
 
-	return false;
+	return MakeID(idx, threadSlots[idx].generation);
+}
+
+CobThreadID CCobEngine::AddThread(CCobThread&& thread)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	if (thread.GetID() == kInvalidCobThreadID)
+		thread.SetID(GenThreadID());
+
+	const CobThreadID id = thread.GetID();
+	const uint32_t idx = IDSlotIdx(id);
+	assert(idx < threadSlots.size());
+
+	ThreadSlot& slot = threadSlots[idx];
+	assert(slot.occupied);
+	assert(slot.generation == IDGeneration(id));
+
+	CCobInstance* o = thread.cobInst;
+	slot.thread = std::move(thread);
+	o->AddThreadID(id);
+
+	TracyPlot(numCobThreadsPlot, static_cast<int64_t>(threadSlots.size() - freeSlots.size()));
+
+	return id;
+}
+
+bool CCobEngine::RemoveThread(CobThreadID threadID)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	const uint32_t idx = IDSlotIdx(threadID);
+	if (idx >= threadSlots.size())
+		return false;
+
+	ThreadSlot& slot = threadSlots[idx];
+	if (!slot.occupied || slot.generation != IDGeneration(threadID))
+		return false;
+
+	// Mirror the old unordered_map::erase semantics: run ~CCobThread so that
+	// Stop() fires the thread callback and un-registers the id from its owner
+	// CCobInstance's threadIDs list, and the data/call stacks return to the
+	// static free pools. Then placement-new a fresh default-initialized body
+	// back into the slot so it's safe for the next occupant.
+	slot.thread.~CCobThread();
+	new (&slot.thread) CCobThread();
+	slot.occupied = false;
+	freeSlots.push_back(idx);
+
+	TracyPlot(numCobThreadsPlot, static_cast<int64_t>(threadSlots.size() - freeSlots.size()));
+	return true;
+}
+
+void CCobEngine::ReleaseReservation(CobThreadID threadID)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	const uint32_t idx = IDSlotIdx(threadID);
+	if (idx >= threadSlots.size())
+		return;
+
+	ThreadSlot& slot = threadSlots[idx];
+	if (!slot.occupied || slot.generation != IDGeneration(threadID))
+		return;
+
+	slot.occupied = false;
+	freeSlots.push_back(idx);
 }
 
 void CCobEngine::ProcessQueuedThreads() {
@@ -73,14 +138,15 @@ void CCobEngine::ProcessQueuedThreads() {
 
 	// Remove threads killed during Tick by other thread (SIGNAL), we do it
 	// here as nothing is actively referencing any thread's memory here.
-	for (int threadID: tickRemovedThreads) {
+	for (CobThreadID threadID: tickRemovedThreads) {
 		RemoveThread(threadID);
 	}
 	tickRemovedThreads.clear();
 
-	// move new threads spawned by START into threadInstances;
-	// their ID's will already have been scheduled into either
-	// waitingThreadIDs or sleepingThreadIDs
+	// move new threads spawned by START into their reserved slots; their
+	// ID's will already have been scheduled into either waitingThreadIDs or
+	// sleepingThreadIDs, and their slots were reserved by GenThreadID at
+	// START time.
 	for (CCobThread& t: tickAddedThreads) {
 		AddThread(std::move(t));
 	}
@@ -100,7 +166,7 @@ void CCobEngine::ScheduleThread(const CCobThread* thread)
 			sleepingThreadIDs.push(SleepingThread{thread->GetID(), thread->GetWakeTime()});
 		} break;
 		default: {
-			LOG_L(L_ERROR, "[COBEngine::%s] unknown state %d for thread %d", __func__, thread->GetState(), thread->GetID());
+			LOG_L(L_ERROR, "[COBEngine::%s] unknown state %d for thread %lld", __func__, thread->GetState(), static_cast<long long>(thread->GetID()));
 		} break;
 	}
 }
@@ -110,8 +176,10 @@ void CCobEngine::SanityCheckThreads(const CCobInstance* owner)
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (false) {
 		// no threads belonging to owner should be left
-		for (const auto& p: threadInstances) {
-			assert(p.second.cobInst != owner);
+		for (const ThreadSlot& s: threadSlots) {
+			if (!s.occupied)
+				continue;
+			assert(s.thread.cobInst != owner);
 		}
 		for (const CCobThread& t: tickAddedThreads) {
 			assert(t.cobInst != owner);
@@ -138,19 +206,17 @@ void CCobEngine::WakeSleepingThreads()
 	ZoneScoped;
 	// check on the sleeping threads, remove any whose owner died
 	while (!sleepingThreadIDs.empty()) {
-		CCobThread* zzzThread = GetThread((sleepingThreadIDs.top()).id);
-
-		if (zzzThread == nullptr) {
-			sleepingThreadIDs.pop();
-			continue;
-		}
-
-		// not yet time to execute this thread or any subsequent sleepers
-		if (zzzThread->GetWakeTime() >= currentTime)
+		// PQ already knows the earliest wakeTime — bail before any hashmap probe
+		// when nothing is due.
+		const auto top = sleepingThreadIDs.top();
+		if (top.wt >= currentTime)
 			break;
 
-		// remove executing thread from the queue
 		sleepingThreadIDs.pop();
+
+		CCobThread* zzzThread = GetThread(top.id);
+		if (zzzThread == nullptr)
+			continue;
 
 		// wake up the thread and tick it (if not dead)
 		// this can quite possibly re-add the thread to <sleepingThreadIDs>
@@ -164,7 +230,7 @@ void CCobEngine::WakeSleepingThreads()
 				RemoveThread(zzzThread->GetID());
 			} break;
 			default: {
-				LOG_L(L_ERROR, "[COBEngine::%s] unknown state %d for thread %d", __func__, zzzThread->GetState(), zzzThread->GetID());
+				LOG_L(L_ERROR, "[COBEngine::%s] unknown state %d for thread %lld", __func__, zzzThread->GetState(), static_cast<long long>(zzzThread->GetID()));
 			} break;
 		}
 	}
@@ -174,7 +240,7 @@ void CCobEngine::TickRunningThreads()
 {
 	ZoneScoped;
 	// advance all currently running threads
-	for (const int threadID: runningThreadIDs) {
+	for (const CobThreadID threadID: runningThreadIDs) {
 		TickThread(GetThread(threadID));
 	}
 

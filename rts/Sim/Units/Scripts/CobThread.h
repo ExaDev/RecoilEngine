@@ -3,6 +3,7 @@
 #ifndef COB_THREAD_H
 #define COB_THREAD_H
 
+#include <cstdint>
 #include <string>
 #include <array>
 
@@ -11,6 +12,11 @@
 
 class CCobFile;
 class CCobInstance;
+
+// See CobEngine.h for the encoding. Declared here because CCobThread holds
+// its own id and CobThread.h is a dependency of CobEngine.h.
+using CobThreadID = int64_t;
+static constexpr CobThreadID kInvalidCobThreadID = -1;
 
 class CCobStackGuard
 {
@@ -67,7 +73,7 @@ public:
 	void Start(int functionId, int sigMask, const std::array<int, 1 + MAX_COB_ARGS>& args, bool schedule);
 	void Stop();
 
-	void SetID(int threadID) { id = threadID; }
+	void SetID(CobThreadID threadID) { id = threadID; }
 	void SetState(State s) { state = s; }
 
 	/**
@@ -100,7 +106,7 @@ public:
 
 	const std::string& GetName();
 
-	int GetID() const { return id; }
+	CobThreadID GetID() const { return id; }
 	int GetStackVal(int pos) const { return dataStack[pos]; }
 	int GetWakeTime() const { return wakeTime; }
 	int GetRetCode() const { return retCode; }
@@ -148,7 +154,7 @@ protected:
 	}
 
 protected:
-	int id = -1;
+	CobThreadID id = kInvalidCobThreadID;
 	int pc = 0;
 
 	int wakeTime = 0;

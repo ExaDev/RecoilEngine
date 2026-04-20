@@ -3,6 +3,8 @@
 #ifndef COB_INSTANCE_H
 #define COB_INSTANCE_H
 
+#include <cstdint>
+
 #include "UnitScript.h"
 #include "Sim/Units/Unit.h"
 
@@ -47,8 +49,12 @@ protected:
 public:
 	CCobFile* cobFile;
 
+	// CobThreadID is int64_t but we can't include CobThread.h here (it pulls
+	// CobInstance.h back in), so keep the aliased type explicit.
+	using CobThreadID = int64_t;
+
 	std::vector<int> staticVars;
-	std::vector<int> threadIDs;
+	std::vector<CobThreadID> threadIDs;
 
 public:
 	// creg only
@@ -59,8 +65,8 @@ public:
 	void Init();
 	void PostLoad();
 
-	void AddThreadID(int threadID) { threadIDs.push_back(threadID); }
-	bool RemoveThreadID(int threadID)
+	void AddThreadID(CobThreadID threadID) { threadIDs.push_back(threadID); }
+	bool RemoveThreadID(CobThreadID threadID)
 	{
 		const auto it = std::find(threadIDs.begin(), threadIDs.end(), threadID);
 

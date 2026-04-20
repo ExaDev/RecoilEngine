@@ -81,7 +81,7 @@ void CCobInstance::PostLoad()
 
 	cobFile = cobFileHandler->GetCobFile(unit->unitDef->scriptName);
 
-	for (int threadID: threadIDs) {
+	for (CobThreadID threadID: threadIDs) {
 		CCobThread* t = cobEngine->GetThread(threadID);
 
 		t->cobInst = this;
@@ -512,7 +512,7 @@ float CCobInstance::TargetWeight(int weaponNum, const CUnit* targetUnit)
 void CCobInstance::AnimFinished(AnimType type, int piece, int axis)
 {
 	ZoneScoped;
-	for (int threadID: threadIDs) {
+	for (CobThreadID threadID: threadIDs) {
 		CCobThread* t = cobEngine->GetThread(threadID);
 		t->AnimFinished(type, piece, axis);
 	}
@@ -603,6 +603,13 @@ int CCobInstance::RealCall(int functionId, std::array<int, 1 + MAX_COB_ARGS>& ar
 		// dtor runs the callback
 		if (retCode != nullptr)
 			*retCode = newThread.GetRetCode();
+
+		// The slot we reserved via GenThreadID was never consumed by
+		// AddThread (thread died inline). Return it to the free list now
+		// so it doesn't leak; if the inline Tick enqueued an id of this
+		// slot (e.g. via SLEEP), that queue entry becomes stale and is
+		// dropped the next time WakeSleepingThreads peeks it.
+		cobEngine->ReleaseReservation(newThread.GetID());
 	} else {
 		cobEngine->AddThread(std::move(newThread));
 	}
@@ -730,7 +737,7 @@ void CCobInstance::ThreadCallback(ThreadCallbackType type, int retCode, int cbPa
 void CCobInstance::Signal(int signal)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	for (int threadID: threadIDs) {
+	for (CobThreadID threadID: threadIDs) {
 		CCobThread* t = cobEngine->GetThread(threadID);
 
 		if ((signal & t->GetSignalMask()) == 0)
