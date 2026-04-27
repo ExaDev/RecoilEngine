@@ -81,7 +81,7 @@ void CCobInstance::PostLoad()
 
 	cobFile = cobFileHandler->GetCobFile(unit->unitDef->scriptName);
 
-	for (int threadID: threadIDs) {
+	for (CobThreadID threadID: threadIDs) {
 		CCobThread* t = cobEngine->GetThread(threadID);
 		assert(t != nullptr);
 
@@ -514,7 +514,7 @@ float CCobInstance::TargetWeight(int weaponNum, const CUnit* targetUnit)
 void CCobInstance::AnimFinished(AnimType type, int piece, int axis)
 {
 	ZoneScoped;
-	for (int threadID: threadIDs) {
+	for (CobThreadID threadID: threadIDs) {
 		CCobThread* t = cobEngine->GetThread(threadID);
 		assert(t != nullptr);
 		t->AnimFinished(type, piece, axis);
@@ -611,6 +611,7 @@ int CCobInstance::RealCall(int functionId, std::array<int, 1 + MAX_COB_ARGS>& ar
 	} else {
 		cobEngine->AddThread(std::move(newThread));
 	}
+
 
 	// handle any spawned threads
 	cobEngine->ProcessQueuedThreads();
@@ -735,7 +736,7 @@ void CCobInstance::ThreadCallback(ThreadCallbackType type, int retCode, int cbPa
 void CCobInstance::Signal(int signal)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	for (int threadID: threadIDs) {
+	for (CobThreadID threadID: threadIDs) {
 		CCobThread* t = cobEngine->GetThread(threadID);
 		assert(t != nullptr);
 

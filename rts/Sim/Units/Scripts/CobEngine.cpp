@@ -12,18 +12,6 @@
 #include "System/Misc/TracyDefs.h"
 #include "Lua/LuaUI.h"
 
-// For slot pool generation handling.
-// We're using 13 generation bits / 18 slot bits so that:
-// * at 32k MAX_UNITS, every unit could have 8 cob scripts
-// * there's room for 8,192 generations
-// both of which are WELL beyond the supported use case of the engine.
-static constexpr uint32_t THREAD_ID_GEN_BITS  = 13;
-static constexpr uint32_t THREAD_ID_SLOT_BITS = 18;
-constexpr static uint32_t GENERATION_MAX = (1 << THREAD_ID_GEN_BITS) - 1;
-constexpr static uint32_t SLOT_MAX = (1 << THREAD_ID_SLOT_BITS) - 1;
-static_assert(THREAD_ID_GEN_BITS + THREAD_ID_SLOT_BITS <= 31,                                  
-			"thread id must fit in non-negative int");
-
 CR_BIND(CCobEngine, )
 
 CR_REG_METADATA(CCobEngine, (
@@ -56,7 +44,7 @@ CR_REG_METADATA(CCobEngine::Slot, (
 
 static const char* const numCobThreadsPlot = "CobThreads";
 
-int CCobEngine::AllocateThreadID()
+CobThreadID CCobEngine::AllocateThreadID()
 {
 	size_t slotIndex;
     
@@ -69,23 +57,23 @@ int CCobEngine::AllocateThreadID()
 	}
 	
 	Slot* slot = &threadSlots[slotIndex];
-	slot->generation = (slot->generation + 1) & GENERATION_MAX;
+	slot->generation = (slot->generation + 1) & CobThreadID::GEN_MAX;
 	slot->isOccupied = true;
-	return PackThreadID(slot->generation, slotIndex);
+	return CobThreadID::Pack(slot->generation, slotIndex);
 }
 
-int CCobEngine::AddThread(CCobThread&& thread)
+CobThreadID CCobEngine::AddThread(CCobThread&& thread)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
-	if (thread.GetID() == -1) {
+	if (!thread.GetID().IsValid()) {
 		thread.SetID(AllocateThreadID());
 	}
-	assert(thread.GetID() >= 0);
+	assert(thread.GetID().IsValid());
 
 	uint32_t generation;
     size_t slotIndex;
-    UnpackThreadID(thread.GetID(), generation, slotIndex);
-	
+    thread.GetID().Unpack(generation, slotIndex);
+
 	Slot* slot = &threadSlots[slotIndex];
 	slot->thread = std::move(thread);
 	slot->thread.cobInst->AddThreadID(slot->thread.GetID());
@@ -94,13 +82,13 @@ int CCobEngine::AddThread(CCobThread&& thread)
 	return slot->thread.GetID();
 }
 
-bool CCobEngine::RemoveThread(int threadID) {
+bool CCobEngine::RemoveThread(CobThreadID threadID) {
 	RECOIL_DETAILED_TRACY_ZONE;
-	assert(threadID >= 0);
+	assert(threadID.IsValid());
 
     size_t slotIndex;
 	uint32_t generation;
-	UnpackThreadID(threadID,  generation, slotIndex);
+	threadID.Unpack(generation, slotIndex);
 	if unlikely(slotIndex >= threadSlots.size()) {
     	return false;
 	}
@@ -125,7 +113,7 @@ void CCobEngine::ProcessQueuedThreads() {
 
 	// Remove threads killed during Tick by other thread (SIGNAL), we do it
 	// here as nothing is actively referencing any thread's memory here.
-	for (int threadID: tickRemovedThreads) {
+	for (CobThreadID threadID: tickRemovedThreads) {
 		RemoveThread(threadID);
 	}
 	tickRemovedThreads.clear();
@@ -152,7 +140,7 @@ void CCobEngine::ScheduleThread(const CCobThread* thread)
 			sleepingThreadIDs.push(SleepingThread{thread->GetID(), thread->GetWakeTime()});
 		} break;
 		default: {
-			LOG_L(L_ERROR, "[COBEngine::%s] unknown state %d for thread %d", __func__, thread->GetState(), thread->GetID());
+			LOG_L(L_ERROR, "[COBEngine::%s] unknown state %d for thread %d", __func__, thread->GetState(), thread->GetID().Raw());
 		} break;
 	}
 }
@@ -216,7 +204,7 @@ void CCobEngine::WakeSleepingThreads()
 				RemoveThread(zzzThread->GetID());
 			} break;
 			default: {
-				LOG_L(L_ERROR, "[COBEngine::%s] unknown state %d for thread %d", __func__, zzzThread->GetState(), zzzThread->GetID());
+				LOG_L(L_ERROR, "[COBEngine::%s] unknown state %d for thread %d", __func__, zzzThread->GetState(), zzzThread->GetID().Raw());
 			} break;
 		}
 	}
@@ -226,7 +214,7 @@ void CCobEngine::TickRunningThreads()
 {
 	ZoneScoped;
 	// advance all currently running threads
-	for (const int threadID: runningThreadIDs) {
+	for (const CobThreadID threadID: runningThreadIDs) {
 		TickThread(GetThread(threadID));
 	}
 
@@ -291,19 +279,3 @@ void CCobEngine::RunDeferredCallins()
 	}
 }
 
-int CCobEngine::PackThreadID(const uint32_t generation, const size_t slotIndex) {
-	assert(slotIndex <= SLOT_MAX);
-	assert(generation <= GENERATION_MAX);
-	if unlikely (slotIndex > SLOT_MAX || generation > GENERATION_MAX) {
-		LOG_L(L_ERROR, "[CCobEngine::%s] cannot pack id (generation=%u, slotIndex=%zu) — exceeds GENERATION_MAX=%u or SLOT_MAX=%u",
-			__func__, generation, slotIndex, GENERATION_MAX, SLOT_MAX);
-		return -1;
-	}
-	return static_cast<int>((generation << THREAD_ID_SLOT_BITS) | slotIndex);
-}
-
-void CCobEngine::UnpackThreadID(const int threadID, uint32_t& generation, size_t& slotIndex) {
-	const uint32_t bits = static_cast<uint32_t>(threadID);
-	generation = (bits >> THREAD_ID_SLOT_BITS) & GENERATION_MAX;
-	slotIndex = bits & SLOT_MAX;
-}

@@ -12,6 +12,7 @@
 #include <deque>
 
 #include "CobThread.h"
+#include "CobThreadID.h"
 #include "CobDeferredCallin.h"
 #include "System/creg/creg_cond.h"
 #include "System/creg/STL_Queue.h"
@@ -31,7 +32,7 @@ public:
 	struct SleepingThread {
 		CR_DECLARE_STRUCT(SleepingThread)
 
-		int id;
+		CobThreadID id;
 		int wt;
 	};
 
@@ -84,10 +85,10 @@ public:
 	void ShowScriptError(const std::string& msg);
 
 
-	CCobThread* GetThread(int threadID) {
+	CCobThread* GetThread(CobThreadID threadID) {
 		uint32_t generation;
 		size_t slotIndex;
-		UnpackThreadID(threadID, generation, slotIndex);
+		threadID.Unpack(generation, slotIndex);
 		if (slotIndex >= threadSlots.size()) {
 			return nullptr;
 		}
@@ -100,11 +101,11 @@ public:
 		return &matchingSlot->thread;
 	}
 
-	bool RemoveThread(int threadID);
-	int AddThread(CCobThread&& thread);
+	bool RemoveThread(CobThreadID threadID);
+	CobThreadID AddThread(CCobThread&& thread);
 
 	void QueueAddThread(CCobThread&& thread) { tickAddedThreads.emplace_back(std::move(thread)); }
-	void QueueRemoveThread(int threadID) { tickRemovedThreads.emplace_back(threadID); }
+	void QueueRemoveThread(CobThreadID threadID) { tickRemovedThreads.emplace_back(threadID); }
 	void ProcessQueuedThreads();
 
 	void ScheduleThread(const CCobThread* thread);
@@ -114,7 +115,7 @@ public:
 	//       that relies on the new stability guarantees of the deque/slots means we 
 	//       could AddThread instead of separating thread ids from storage.
 	// this MUST be followed by an AddThread or a QueueAddThread or slots will leak.
-	int AllocateThreadID();
+	CobThreadID AllocateThreadID();
 
 	const auto& GetThreadSlots() const { return threadSlots; }
 //	const auto& GetTickAddedThreads() const { return tickAddedThreads; }
@@ -132,9 +133,6 @@ private:
 	void WakeSleepingThreads();
 	void TickRunningThreads();
 
-	static int PackThreadID(uint32_t generation, size_t slotIndex);
-	static void UnpackThreadID(int threadID, uint32_t& generation, size_t& slotIndex);
-
 private:
 	// slot pool of live threads across all script instances, indexed by id
 	// (this is a perf optimization to reuse instances since theres so much churn)
@@ -143,10 +141,10 @@ private:
 	// threads that are spawned during Tick
 	std::vector<CCobThread> tickAddedThreads;
 	// threads that are killed during Tick
-	std::vector<int> tickRemovedThreads;
+	std::vector<CobThreadID> tickRemovedThreads;
 
-	std::vector<int> runningThreadIDs;
-	std::vector<int> waitingThreadIDs;
+	std::vector<CobThreadID> runningThreadIDs;
+	std::vector<CobThreadID> waitingThreadIDs;
 
 	spring::unordered_map<int, std::vector<CCobDeferredCallin> > deferredCallins;
 
