@@ -11,6 +11,7 @@
 #include "Game/GlobalUnsynced.h"
 #include "Map/ReadMap.h"
 #include "Net/Protocol/NetProtocol.h"
+#include "Net/Protocol/DediMetric.h"
 #include "Sim/Misc/ModInfo.h"
 #include "Sim/Units/Unit.h"
 #include "Sim/Units/UnitDef.h"
@@ -417,9 +418,44 @@ void CTeam::SlowUpdate()
 		currentStats.frame = gs->frameNum;
 		statHistory.push_back(currentStats);
 
+		EmitDediMetricsSample();
+
 		nextHistoryEntry = gs->frameNum + (TeamStatistics::statsPeriod * GAME_SPEED);
 		GetCurrentStats().frame = nextHistoryEntry;
 	}
+}
+
+
+void CTeam::EmitDediMetricsSample() const
+{
+	// TeamStatistics is deterministic synced state — every client computes the
+	// same values. Gate emission on "I am this team's leader" so exactly one
+	// client emits per team. Leaderless teams (gaia, dead, fully unmanned slots)
+	// skip emission for now; statHistory is still in the demo file regardless.
+	if (!HasLeader() || leader != gu->myPlayerNum)
+		return;
+
+	const TeamStatistics& s = statHistory.back();
+	using dedimetric::Counter;
+	Counter("metalUsed",        s.metalUsed,        teamNum);
+	Counter("energyUsed",       s.energyUsed,       teamNum);
+	Counter("metalProduced",    s.metalProduced,    teamNum);
+	Counter("energyProduced",   s.energyProduced,   teamNum);
+	Counter("metalExcess",      s.metalExcess,      teamNum);
+	Counter("energyExcess",     s.energyExcess,     teamNum);
+	Counter("metalReceived",    s.metalReceived,    teamNum);
+	Counter("energyReceived",   s.energyReceived,   teamNum);
+	Counter("metalSent",        s.metalSent,        teamNum);
+	Counter("energySent",       s.energySent,       teamNum);
+	Counter("damageDealt",      s.damageDealt,      teamNum);
+	Counter("damageReceived",   s.damageReceived,   teamNum);
+	Counter("unitsProduced",    s.unitsProduced,    teamNum);
+	Counter("unitsDied",        s.unitsDied,        teamNum);
+	Counter("unitsReceived",    s.unitsReceived,    teamNum);
+	Counter("unitsSent",        s.unitsSent,        teamNum);
+	Counter("unitsCaptured",    s.unitsCaptured,    teamNum);
+	Counter("unitsOutCaptured", s.unitsOutCaptured, teamNum);
+	Counter("unitsKilled",      s.unitsKilled,      teamNum);
 }
 
 

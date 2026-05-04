@@ -73,6 +73,9 @@ public:
 	void AddUnit(CUnit* unit, AddType type);
 	void RemoveUnit(CUnit* unit, RemoveType type);
 
+private:
+	void EmitDediMetricsSample() const;
+
 public:
 	int teamNum;
 	unsigned int numUnits; // number of units this team controls

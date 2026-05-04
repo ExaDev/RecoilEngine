@@ -65,6 +65,7 @@
 #include "Map/ReadMap.h"
 #include "Net/GameServer.h"
 #include "Net/Protocol/NetProtocol.h"
+#include "Net/Protocol/DediMetric.h"
 #include "Sim/Ecs/Registry.h"
 #include "Sim/Ecs/Helper.h"
 #include "Sim/Features/FeatureDef.h"
@@ -1875,8 +1876,20 @@ void CGame::GameEnd(const std::vector<unsigned char>& winningAllyTeams, bool tim
 	record->SetWinningAllyTeams(winningAllyTeams);
 
 	// tell everybody about our APM, it's the most important statistic
-	if (!timeout)
+	if (!timeout) {
 		clientNet->Send(CBaseNetProtocol::Get().SendPlayerStat(gu->myPlayerNum, playerHandler.Player(gu->myPlayerNum)->currentStats));
+
+		// Mirror our PlayerStatistics into the dedimsg sidecar file as final-snapshot
+		// counters (cumulative running totals). Each client emits its own player;
+		// rows carry the emitter's playerNum and "team":-1 (no team scope).
+		const PlayerStatistics& ps = playerHandler.Player(gu->myPlayerNum)->currentStats;
+		using dedimetric::Counter;
+		Counter("mousePixels",  ps.mousePixels);
+		Counter("mouseClicks",  ps.mouseClicks);
+		Counter("keyPresses",   ps.keyPresses);
+		Counter("numCommands",  ps.numCommands);
+		Counter("unitCommands", ps.unitCommands);
+	}
 
 	for (int i = 0; i < numPlayers; ++i) {
 		record->SetPlayerStats(i, playerHandler.Player(i)->currentStats);
