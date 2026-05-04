@@ -48,7 +48,11 @@
 #include "Map/SMF/SMFGroundDrawer.h"
 #include "Map/SMF/ROAM/RoamMeshDrawer.h"
 #include "Net/Protocol/NetProtocol.h"
+#include "Net/Protocol/DediMsgHeaders.h"
+#include "Net/Protocol/DediMetric.h"
 #include "Net/GameServer.h"
+
+#include <cmath>
 #include "Rendering/Env/ISky.h"
 #include "Rendering/Env/SunLighting.h"
 #include "Rendering/Env/WaterRendering.h"
@@ -259,6 +263,13 @@ bool LuaUnsyncedCtrl::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(SendLuaMenuMsg);
 
 	REGISTER_LUA_CFUNC(SendDediMsg);
+
+	// Spring.Metrics subtable: engine-defined metric API on top of NETMSG_DEDIMSG.
+	lua_pushliteral(L, "Metrics");
+	lua_createtable(L, 0, 2);
+	REGISTER_NAMED_LUA_CFUNC("Counter", MetricsCounter);
+	REGISTER_NAMED_LUA_CFUNC("Gauge",   MetricsGauge);
+	lua_rawset(L, -3);
 
 	REGISTER_LUA_CFUNC(LoadCmdColorsConfig);
 	REGISTER_LUA_CFUNC(LoadCtrlPanelConfig);
@@ -3895,7 +3906,6 @@ namespace {
 constexpr size_t   kDediMsgWireOverhead     = sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint8_t);
 constexpr size_t   kDediMsgHeaderSize       = sizeof(uint16_t);
 constexpr size_t   kDediMsgMaxPayload       = (size_t(1) << 16) - 1 - kDediMsgWireOverhead - kDediMsgHeaderSize;
-constexpr uint16_t kDediMsgGameRangeMin   = 0x1000;
 
 } // namespace
 
@@ -3922,8 +3932,8 @@ constexpr uint16_t kDediMsgGameRangeMin   = 0x1000;
 int LuaUnsyncedCtrl::SendDediMsg(lua_State* L)
 {
 	const lua_Integer headerArg = luaL_checkinteger(L, 1);
-	if (headerArg < kDediMsgGameRangeMin || headerArg > 0xFFFF)
-		luaL_error(L, "SendDediMsg() header 0x%x must be in the game-private range 0x%04x..0xFFFF", (unsigned)headerArg, (unsigned)kDediMsgGameRangeMin);
+	if (headerArg < dedimsg::kGameRangeMin || headerArg > 0xFFFF)
+		luaL_error(L, "SendDediMsg() header 0x%x must be in the game-private range 0x%04x..0xFFFF", (unsigned)headerArg, (unsigned)dedimsg::kGameRangeMin);
 
 	size_t payloadLen = 0;
 	const char* payload = luaL_optlstring(L, 2, "", &payloadLen);
@@ -3939,6 +3949,129 @@ int LuaUnsyncedCtrl::SendDediMsg(lua_State* L)
 	} catch (const netcode::PackPacketException& ex) {
 		luaL_error(L, "SendDediMsg() packet error: %s", ex.what());
 	}
+	return 0;
+}
+
+
+/******************************************************************************
+ * Spring.Metrics — engine-defined counter/gauge sink.
+ *
+ * Each call sends a NETMSG_DEDIMSG with an engine-reserved record-type header
+ * (see DediMsgHeaders.h). The game server intercepts these BEFORE the autohost
+ * forward (so metrics never reach the autohost) and appends one JSONL row per
+ * observation to a sidecar file at "{demoFilePath}.metrics.jsonl.gz":
+ *
+ *   {"frame":<f>,"player":<p>,"team":<t>,"type":"counter"|"gauge","name":"<n>","value":<v>}
+ *
+ * "team" is -1 when no team scope was given (player-only metric).
+ *
+ * Constraints (validated at the Lua boundary; rejected with luaL_error):
+ *  - name: string, 1..64 bytes; must not contain '\0', '\t', '\n', '"', '\\'
+ *    (any of these would corrupt the JSONL output)
+ *  - value: finite number (no NaN/Inf)
+ *  - teamNum (optional 3rd arg): integer in [0, 254]
+ *
+ * Counter / Gauge differ only in the type tag stored on disk. By convention:
+ *  - Counter: cumulative monotonic running total. ("Total X so far is V")
+ *  - Gauge:   an instantaneous reading at the given frame ("X is currently V").
+ *
+ * Shares the per-player 64 KiB/s NETMSG_DEDIMSG rate limit.
+******************************************************************************/
+
+namespace {
+
+// Common name + value validation. Errors via luaL_error (non-local exit).
+// nameOut points into Lua's string buffer and stays valid until the call returns.
+void ValidateMetricArgs(lua_State* L, int nameIdx, int valueIdx, const char* api,
+                        const char*& nameOut, size_t& nameLenOut, double& valueOut)
+{
+	nameOut = luaL_checklstring(L, nameIdx, &nameLenOut);
+	if (nameLenOut == 0 || nameLenOut > dedimsg::kMaxMetricNameLen) {
+		luaL_error(L, "%s: name length must be 1..%d (got %d)",
+			api, (int)dedimsg::kMaxMetricNameLen, (int)nameLenOut);
+	}
+	for (size_t i = 0; i < nameLenOut; ++i) {
+		const char c = nameOut[i];
+		if (c == '\0' || c == '\t' || c == '\n' || c == '"' || c == '\\') {
+			luaL_error(L, "%s: name byte 0x%02x at offset %d is reserved",
+				api, (unsigned)(uint8_t)c, (int)i);
+		}
+	}
+	valueOut = luaL_checknumber(L, valueIdx);
+	if (!std::isfinite(valueOut))
+		luaL_error(L, "%s: value must be finite (got %g)", api, valueOut);
+}
+
+// Reads optional teamNum at slot `idx`. Returns -1 if absent/nil. Errors on
+// out-of-range. teamNum 255 (kNoTeam) is rejected to avoid wire-sentinel confusion.
+int OptionalTeamNum(lua_State* L, int idx, const char* api)
+{
+	if (lua_isnoneornil(L, idx))
+		return -1;
+	const lua_Integer t = luaL_checkinteger(L, idx);
+	if (t < 0 || t >= dedimsg::kNoTeam)
+		luaL_error(L, "%s: teamNum must be in [0, %d] (got %lld)",
+			api, (int)dedimsg::kNoTeam - 1, (long long)t);
+	return static_cast<int>(t);
+}
+
+} // namespace
+
+
+/***
+ *
+ * @function Spring.Metrics.Counter
+ *
+ * Append one counter observation to the dediserver's metrics sidecar. Counter
+ * values are cumulative monotonic running totals: emit the absolute total at
+ * the current frame. The emitting player's playerNum is recorded in the JSON row's "player"
+ * key. If `teamNum` is given, the row carries it under "team"; otherwise the
+ * row's "team" is -1.
+ *
+ * @param name    string  metric name (1..64 bytes, no `\0\t\n"\\`)
+ * @param value   number  finite cumulative total
+ * @param teamNum integer optional, 0..254; omit / nil for player-only scope
+ * @return nil
+ *
+ * @see Spring.Metrics.Gauge
+ * @see Spring.SendDediMsg
+ */
+int LuaUnsyncedCtrl::MetricsCounter(lua_State* L)
+{
+	constexpr const char* kApi = "Spring.Metrics.Counter";
+	const char* name; size_t nameLen; double value;
+	ValidateMetricArgs(L, 1, 2, kApi, name, nameLen, value);
+	const int teamNum = OptionalTeamNum(L, 3, kApi);
+	if (!dedimetric::Counter(std::string_view(name, nameLen), value, teamNum))
+		luaL_error(L, "%s: send failed", kApi);
+	return 0;
+}
+
+
+/***
+ *
+ * @function Spring.Metrics.Gauge
+ *
+ * Append one gauge observation. Gauges are instantaneous readings at the
+ * given frame (e.g. "fps is currently 60"). Multiple observations form a
+ * time series. If `teamNum` is given, the row carries it under "team";
+ * otherwise the row's "team" is -1.
+ *
+ * @param name    string  metric name (1..64 bytes, no `\0\t\n"\\`)
+ * @param value   number  finite numeric reading
+ * @param teamNum integer optional, 0..254; omit / nil for player-only scope
+ * @return nil
+ *
+ * @see Spring.Metrics.Counter
+ */
+int LuaUnsyncedCtrl::MetricsGauge(lua_State* L)
+{
+	constexpr const char* kApi = "Spring.Metrics.Gauge";
+	const char* name; size_t nameLen; double value;
+	ValidateMetricArgs(L, 1, 2, kApi, name, nameLen, value);
+	const int teamNum = OptionalTeamNum(L, 3, kApi);
+	if (!dedimetric::Gauge(std::string_view(name, nameLen), value, teamNum))
+		luaL_error(L, "%s: send failed", kApi);
 	return 0;
 }
 

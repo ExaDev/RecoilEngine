@@ -15,6 +15,10 @@
 #include "GameSkirmishAI.h"
 #include "AutohostInterface.h"
 
+#include <cmath>
+#include <cstring>
+#include "Net/Protocol/DediMsgHeaders.h"
+
 #include "Game/ClientSetup.h"
 #include "Game/GameSetup.h"
 
@@ -153,6 +157,11 @@ CGameServer::~CGameServer()
 
 	// after this, demoRecorder goes out of scope and its dtor is called
 	WriteDemoData();
+
+	if (metricsFile != nullptr) {
+		gzclose(metricsFile);
+		metricsFile = nullptr;
+	}
 }
 
 
@@ -1395,6 +1404,14 @@ void CGameServer::ProcessPacket(const unsigned playerNum, std::shared_ptr<const 
 					break;
 				}
 				bytesInWindow += static_cast<uint32_t>(payloadLen);
+
+				// Some Engine-reserved headers are intercepted server-side and NEVER
+				// forwarded to the autohost. See Net/Protocol/DediMsgHeaders.h.
+				if (header == dedimsg::METRIC_COUNTER || header == dedimsg::METRIC_GAUGE) {
+					HandleDediMetric(playerNum, header,
+						packet->data + kFrameOverhead, payloadLen);
+					break;
+				}
 
 				if (hostif != nullptr)
 					hostif->SendDediMsg(packet->data, packet->length);
@@ -3200,5 +3217,121 @@ uint8_t CGameServer::ReserveSkirmishAIId()
 	const uint8_t id = freeSkirmishAIs.back();
 	freeSkirmishAIs.pop_back();
 	return id;
+}
+
+
+// Universal preamble for any NETMSG_DEDIMSG metric payload.
+// Wire prefix: <u8 nameLen> <char[nameLen] name> ... (value bytes follow).
+// Validates length + name byte range, returns the name pointer/length and the
+// offset where type-specific value bytes begin. Returns false on bad input.
+static bool ValidateMetricName(const uint8_t* payload, size_t payloadLen,
+                               const char*& outName, uint8_t& outNameLen,
+                               size_t& outValueOffset)
+{
+	if (payloadLen < 1)
+		return false;
+	const uint8_t nameLen = payload[0];
+	if (nameLen == 0 || nameLen > dedimsg::kMaxMetricNameLen)
+		return false;
+	if (payloadLen < size_t(1) + nameLen)
+		return false;
+
+	// Re-validate name bytes server-side (defense vs hand-rolled packets that
+	// bypass the Lua-side check). Reject anything that would break our JSONL.
+	const char* name = reinterpret_cast<const char*>(payload + 1);
+	for (size_t i = 0; i < nameLen; ++i) {
+		const char c = name[i];
+		if (c == '\0' || c == '\t' || c == '\n' || c == '"' || c == '\\')
+			return false;
+	}
+
+	outName = name;
+	outNameLen = nameLen;
+	outValueOffset = size_t(1) + nameLen;
+	return true;
+}
+
+// Counter/Gauge value decoder: expects exactly 8 bytes of finite double.
+// Writes the JSON-encoded value into outJson on success (no `"v":` prefix).
+static bool DecodeFiniteDouble(const uint8_t* payload, size_t payloadLen,
+                               size_t valueOffset, std::string& outJson)
+{
+	if (payloadLen != valueOffset + sizeof(double))
+		return false;
+
+	double value;
+	std::memcpy(&value, payload + valueOffset, sizeof(double));
+	if (!std::isfinite(value))
+		return false;
+
+	outJson = spring::format("%.17g", value);
+	return true;
+}
+
+
+void CGameServer::HandleDediMetric(uint8_t playerNum, uint16_t header,
+                                   const uint8_t* payload, size_t payloadLen)
+{
+	// Wire payload (uniform across player/team scopes):
+	//   <u8 teamNum> <u8 nameLen> <char[nameLen] name> <double value>
+	// teamNum == kNoTeam (0xFF) means "no team scope" -> "team":-1 in the row.
+	if (payloadLen < 1)
+		return;
+	const uint8_t teamByte = payload[0];
+	const int teamNum = (teamByte == dedimsg::kNoTeam) ? -1 : static_cast<int>(teamByte);
+	payload    += 1;
+	payloadLen -= 1;
+
+	const char* name;
+	uint8_t nameLen;
+	size_t valueOffset;
+	if (!ValidateMetricName(payload, payloadLen, name, nameLen, valueOffset))
+		return;
+
+	std::string jsonValue;
+	char tag = '?';
+	switch (header) {
+		case dedimsg::METRIC_COUNTER:
+			if (!DecodeFiniteDouble(payload, payloadLen, valueOffset, jsonValue))
+				return;
+			tag = 'c';
+			break;
+		case dedimsg::METRIC_GAUGE:
+			if (!DecodeFiniteDouble(payload, payloadLen, valueOffset, jsonValue))
+				return;
+			tag = 'g';
+			break;
+		default:
+			return;  // unknown engine header — drop
+	}
+
+	AppendMetricRow(playerNum, tag, name, nameLen, jsonValue, teamNum);
+}
+
+
+void CGameServer::AppendMetricRow(uint8_t playerNum, char tag,
+                                  const char* name, uint8_t nameLen,
+                                  const std::string& jsonValue,
+                                  int teamNum)
+{
+	if (metricsFile == nullptr) {
+		if (demoRecorder == nullptr || demoRecorder->GetName().empty())
+			return;  // no demo path => no sidecar file
+		const std::string path = demoRecorder->GetName() + ".metrics.jsonl.gz";
+		metricsFile = gzopen(path.c_str(), "wb");
+		if (metricsFile == nullptr) {
+			LOG_L(L_WARNING, "[DediMetrics] failed to open sidecar file %s", path.c_str());
+			return;
+		}
+		LOG_L(L_DEBUG, "[DediMetrics] sidecar file opened: %s", path.c_str());
+	}
+
+	const char* typeStr = (tag == 'c') ? "counter" : "gauge";
+	const std::string row = spring::format(
+		"{\"frame\":%d,\"player\":%u,\"team\":%d,\"type\":\"%s\",\"name\":\"%.*s\",\"value\":%s}\n",
+		serverFrameNum, (unsigned)playerNum, teamNum, typeStr,
+		(int)nameLen, name, jsonValue.c_str());
+	gzwrite(metricsFile, row.data(), static_cast<unsigned>(row.size()));
+	gzflush(metricsFile, Z_SYNC_FLUSH);
 }
 

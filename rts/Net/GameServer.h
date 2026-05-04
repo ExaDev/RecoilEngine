@@ -13,6 +13,7 @@
 #include <map>
 #include <set>
 #include <vector>
+#include <zlib.h>
 
 #include "Game/GameData.h"
 #include "Sim/Misc/GlobalConstants.h"
@@ -188,6 +189,20 @@ private:
 
 	float GetDemoTime() const;
 
+	/// Entry point for engine-defined NETMSG_DEDIMSG metric records.
+	/// Validates, dispatches by `header`, and persists. Drops malformed input.
+	void HandleDediMetric(uint8_t playerNum, uint16_t header,
+	                      const uint8_t* payload, size_t payloadLen);
+
+	/// Persist one metric observation. `jsonValue` carries the JSON-encoded value.
+	/// Callers are expected to have formatted jsonValue correctly. `teamNum`
+	/// is written into the row's `"team"` key as-is; pass -1 for player-only
+	/// metrics (the parser interprets -1 as "no team scope").
+	void AppendMetricRow(uint8_t playerNum, char tag,
+	                     const char* name, uint8_t nameLen,
+	                     const std::string& jsonValue,
+	                     int teamNum);
+
 private:
 	///////////////// internal stuff //////////////////
 	void InternalSpeedChange(float newSpeed);
@@ -290,6 +305,8 @@ private:
 	std::unique_ptr<CDemoReader> demoReader;
 	std::unique_ptr<CDemoRecorder> demoRecorder;
 	std::unique_ptr<AutohostInterface> hostif;
+
+	gzFile metricsFile = nullptr;  // sidecar for engine NETMSG_DEDIMSG metrics; gzclose'd in dtor
 
 	CGlobalUnsyncedRNG rng;
 	spring::thread thread;

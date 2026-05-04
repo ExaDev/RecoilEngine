@@ -7,6 +7,7 @@ make_global_var(sources_engine_NetServer
 	)
 set(sources_engine_NetClient
 		"${CMAKE_CURRENT_SOURCE_DIR}/Protocol/NetProtocol.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Protocol/DediMetric.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/NetCommands.cpp"
 	)
 
