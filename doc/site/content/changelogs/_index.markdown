@@ -50,6 +50,19 @@ This is the bleeding-edge changelog since version 2025.06, for **pre-release 202
 - unsynced LuaRules (incl. unsynced LuaGaia) now has access to `io` and `os` libraries.
 - unsynced LuaRules (incl. unsynced LuaGaia) now has access to the `debug` library by default (no longer requires devmode).
 
+### Custom teamcolor palette
+- add `Spring.SetCustomPaletteColor(paletteID, r, g, b) → nil`. Sets a palette color for shader use. See below.
+- add `Spring.GetCustomPaletteColor(paletteID) → r, g, b`.
+- add `Engine.maxCustomPaletteID`, the highest available palette ID.
+- add `Spring.SetUnitPaletteIndex(unitID, paletteID?) → nil`. Assigns a paletteID to a unit. Use nil to reset to the default palette.
+- add `Spring.GetUnitPaletteIndex(unitID) → paletteID?`.
+- add `Spring.SetFeaturePaletteIndex(featureID, paletteID?)`.
+- add `Spring.GetFeaturePaletteIndex(featureID) → paletteID?`.
+- the `teamColor` array in shaders now has much more room and contains both teamcolors and colors of the custom palette, as per above. (FIXME: this should be automatically reflected in existing custom shaders via Spring.GetDefaultEngineUniforms or whatever that one was called, right? or do existing shaders break?)
+- shaders no longer receive unit or feature teamID. Former location of teamID reused (and extended from 8 to 11 bits) with an index in the color palette. Units with a custom paletteID as per above point to the entry that contains that color, but note that the value of that index is different than what is seen from Lua. Units with no custom paletteID have the index point to an entry that contains their team color.
+- the basecontent teamcolor shader takes the above into account, but existing custom shaders will break on account of the bit size change (FIXME: do they? and if yes perhaps that's something to fix?).
+- projectiles unchanged, they still just draw teamcolor natively and cannot use a shader (FIXME: verify).
+
 ### Replay path getters
 - add `Spring.GetReplayFilePath() → string?`, returns path of replay being watched.
 - add `Spring.GetReplayRecordingFilePath() → string?`, returns path of replay to be produced. Note that this is just a prospective file path (nothing is written until the match ends), and that it possible to record a replay of a replay.
