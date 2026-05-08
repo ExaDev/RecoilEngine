@@ -7,10 +7,10 @@
 #include "Sim/Misc/Resource.h"
 #include "Sim/Path/PFSTypes.h"
 
-class CModInfo
+class CModRules
 {
 public:
-	CModInfo() { ResetState(); }
+	CModRules() { ResetState(); }
 
 	void ResetState();
 	void Init(const std::string& modFileName);
@@ -256,6 +256,6 @@ public:
 	bool useStartPositionSelecter;
 };
 
-extern CModInfo modInfo;
+extern CModRules modRules;
 
 #endif // MOD_INFO_H
