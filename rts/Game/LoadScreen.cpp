@@ -137,7 +137,16 @@ bool CLoadScreen::Init()
 	{
 		auto lock = CLoadLock::GetUniqueLock();
 #if defined(__APPLE__)
-		LOG("[LoadScreen::%s] skipping CLuaIntro (macOS EGL workaround)", __func__);
+		// CLuaIntro was disabled on macOS as an EGL-path workaround
+		// (it uses the global font / gl.*Text which previously broke on GL4).
+		// Now that the core-profile font shaders are fixed, allow re-enabling
+		// it at runtime to render the actual loading screen.
+		if (getenv("SPRING_MAC_ENABLE_LUAINTRO") != nullptr) {
+			LOG("[LoadScreen::%s] CLuaIntro enabled (SPRING_MAC_ENABLE_LUAINTRO)", __func__);
+			CLuaIntro::LoadFreeHandler();
+		} else {
+			LOG("[LoadScreen::%s] skipping CLuaIntro (set SPRING_MAC_ENABLE_LUAINTRO=1 to enable)", __func__);
+		}
 #else
 		CLuaIntro::LoadFreeHandler();
 #endif
