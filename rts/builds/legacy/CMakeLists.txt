@@ -32,7 +32,22 @@ set(engineLibraries SDL2::SDL2)
 
 set(OpenGL_GL_PREFERENCE LEGACY)
 find_package_static(OpenGL 3.0 REQUIRED)
-list(APPEND engineLibraries OpenGL::GL)
+# On macOS, linking Apple's OpenGL.framework causes its NSWindow notification
+# observer to register and then bus-error in +[NSOpenGLContext currentContext]
+# on macOS 26 (Tahoe). When a Mesa libEGL is provided, link Mesa's libGL alongside
+# it and skip OpenGL.framework entirely.
+if (APPLE AND SPRING_MAC_LIBEGL)
+	get_filename_component(_MESA_LIB_DIR "${SPRING_MAC_LIBEGL}" DIRECTORY)
+	if (EXISTS "${_MESA_LIB_DIR}/libGL.dylib")
+		list(APPEND engineLibraries "${_MESA_LIB_DIR}/libGL.dylib")
+		message(STATUS "macOS: using Mesa libGL at ${_MESA_LIB_DIR}/libGL.dylib (skipping Apple OpenGL.framework)")
+	else()
+		message(WARNING "SPRING_MAC_LIBEGL set but no libGL.dylib next to it; falling back to OpenGL.framework")
+		list(APPEND engineLibraries OpenGL::GL)
+	endif()
+else()
+	list(APPEND engineLibraries OpenGL::GL)
+endif()
 
 find_fontconfig_hack()
 find_package_static(Fontconfig 2.11 REQUIRED)
@@ -58,19 +73,12 @@ endif (UNIX AND NOT APPLE)
 if (APPLE)
 	find_library(COREFOUNDATION_LIBRARY Foundation)
 	list(APPEND engineLibraries ${COREFOUNDATION_LIBRARY})
-	# Mesa's EGL is used to bridge OpenGL onto Apple's CAMetalLayer (Kopper/Zink).
-	# Allow MESA_PREFIX (or pkg-config / standard Homebrew layout) to locate it.
-	find_library(EGL_LIBRARY
-		NAMES EGL
-		HINTS
-			$ENV{MESA_PREFIX}/lib
-			/opt/homebrew/opt/mesa/lib
-			/opt/homebrew/lib
-			/usr/local/opt/mesa/lib
-			/usr/local/lib
-		REQUIRED
-	)
-	list(APPEND engineLibraries ${EGL_LIBRARY})
+	set(SPRING_MAC_LIBEGL "" CACHE FILEPATH
+		"Optional path to a Mesa libEGL.dylib (e.g. a Zink+KosmicKrisp build). \
+Leave empty to link only against Apple's OpenGL.framework.")
+	if (SPRING_MAC_LIBEGL)
+		list(APPEND engineLibraries "${SPRING_MAC_LIBEGL}")
+	endif()
 	list(APPEND engineLibraries objc)
 endif (APPLE)
 
