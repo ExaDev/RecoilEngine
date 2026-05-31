@@ -21,10 +21,14 @@ if (SDL2_FOUND AND NOT TARGET SDL2::SDL2)
                         INTERFACE_INCLUDE_DIRECTORIES "${SDL2_INCLUDE_DIRS}"
                         IMPORTED_LOCATION ${SDL2_LIBRARY}
   )
-elseif(SDL2_FOUND AND TARGET SDL2::SDL2)
-  # SDL2's CMake config may set INTERFACE_INCLUDE_DIRECTORIES to SDL2_INCLUDE_DIR (e.g. /include/SDL2)
-  # but this project uses #include <SDL2/header.h>, so we need the parent directory too
-  # Fix the include directories to include both the SDL2 subdirectory and its parent
+elseif(APPLE AND SDL2_FOUND AND TARGET SDL2::SDL2)
+  # macOS-only: Homebrew's SDL2 CMake config sets INTERFACE_INCLUDE_DIRECTORIES
+  # to SDL2_INCLUDE_DIR (e.g. /opt/homebrew/include/SDL2), but this project
+  # uses #include <SDL2/header.h>, so we need the parent directory too.
+  # Fix the include directories to include both the SDL2 subdirectory and its parent.
+  # Linux distros' sdl2-config already produces a usable include layout, so
+  # mutating INTERFACE_INCLUDE_DIRECTORIES there would leak /usr/include into
+  # every SDL2-consuming target.
   get_target_property(_sdl2_includes SDL2::SDL2 INTERFACE_INCLUDE_DIRECTORIES)
   if(_sdl2_includes)
     set(_new_includes "")

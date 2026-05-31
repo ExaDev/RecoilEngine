@@ -36,7 +36,7 @@ find_package_static(OpenGL 3.0 REQUIRED)
 # observer to register and then bus-error in +[NSOpenGLContext currentContext]
 # on macOS 26 (Tahoe). When a Mesa libEGL is provided, all GL calls in this
 # binary are routed through glad function pointers loaded via eglGetProcAddress,
-# so we don't need libGL at link time at all — libEGL alone is enough.
+# so we don't need libGL at link time at all -- libEGL alone is enough.
 if (APPLE AND SPRING_MAC_LIBEGL)
 	get_filename_component(_MESA_LIB_DIR "${SPRING_MAC_LIBEGL}" DIRECTORY)
 	if (EXISTS "${_MESA_LIB_DIR}/libGL.dylib")
