@@ -111,10 +111,10 @@ namespace QTPFS {
 			const float3& targetPoint,
 			const CSolidObject* owner
 		);
-		void InitializeThread(SearchThreadData* threadData);
+		void InitializeThread(SearchThreadData* threadData, IPath* pathToRepair);
 		void PreLoadNode(uint32_t dir, uint32_t nodeId, uint32_t prevNodeId, const float2& netPoint, uint32_t stepIndex);
 		void LoadPartialPath(IPath* path);
-		void LoadRepairPath();
+		void LoadRepairPath(IPath* pathToRepair);
 		bool Execute(unsigned int searchStateOffset = 0);
 		void Finalize(IPath* path);
 		bool SharedFinalize(const IPath* srcPath, IPath* dstPath);

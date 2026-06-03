@@ -1229,13 +1229,13 @@ bool QTPFS::PathManager::ExecuteSearch(
 	bool isHeadOfPathSharing = !search->doPartialSearch;
 	search->tryPathRepair &= isHeadOfPathSharing;
 
-	search->InitializeThread(&searchThreadData[currentThread]);
+	search->InitializeThread(&searchThreadData[currentThread], path);
 
 	if (search->doPartialSearch) {
-		auto* path = &registry.get<IPath>(partialChainHeadEntity);
-		search->LoadPartialPath(path);
+		auto* sharedPath = &registry.get<IPath>(partialChainHeadEntity);
+		search->LoadPartialPath(sharedPath);
 	} else if (search->doPathRepair) {
-		search->LoadRepairPath();
+		search->LoadRepairPath(path);
 	}
 
 	if (search->Execute(searchStateOffset)) {
@@ -1762,7 +1762,7 @@ float3 QTPFS::PathManager::NextWayPoint(
 
 	// If this is the first call then we may need to jump a bit further in the path if the unit
 	// managed to travel past the first point in the time it took to make the route. 
-	if (nextPointIndex == 1)  {
+	if (nextPointIndex == 1) {
 		constexpr float invSin45deg = 1.42f; // to account for a square's diagonal being longer.
 		constexpr float squareRadius = SQUARE_SIZE*SQUARE_SIZE*invSin45deg;
 		for (unsigned int i = (livePath->GetNextPointIndex()); i < lastPointIndex; i++) {
@@ -1797,12 +1797,15 @@ float3 QTPFS::PathManager::NextWayPoint(
 	// 	LOG("%s: repath target waypoint (%d) current waypoint (%d) of (%d) pathId=%d", __func__
 	// 			, livePath->GetRepathTriggerIndex(), nextPointIndex, lastPointIndex, pathID);
 
-	if (livePath->GetRepathTriggerIndex() > 0 && nextPointIndex >= livePath->GetRepathTriggerIndex()) {
+	if (livePath->GetRepathTriggerIndex() > 0
+			&& nextPointIndex >= livePath->GetRepathTriggerIndex()
+			&& !livePath->IsRepathTriggered()) {
 		// Request an update to the path.
 		assert(livePath->GetOwner() != nullptr);
 		assert(registry.all_of<PathRequeueSearch>(pathEntity));
 		registry.get<PathRequeueSearch>(pathEntity).value = true;
-		livePath->ClearGetRepathTriggerIndex();
+		// livePath->ClearGetRepathTriggerIndex();
+		livePath->SetRepathTriggered(true);
 	}
 
 	return livePath->GetPoint(nextPointIndex);

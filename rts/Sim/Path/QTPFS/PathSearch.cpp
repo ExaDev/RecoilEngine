@@ -146,7 +146,7 @@ void QTPFS::PathSearch::Initialize(
 // #pragma GCC push_options
 // #pragma GCC optimize ("O0")
 
-void QTPFS::PathSearch::InitializeThread(SearchThreadData* threadData) {
+void QTPFS::PathSearch::InitializeThread(SearchThreadData* threadData, IPath* pathToRepair) {
 	ZoneScoped;
 	searchThreadData = threadData;
 
@@ -178,8 +178,8 @@ void QTPFS::PathSearch::InitializeThread(SearchThreadData* threadData) {
 		return false;
 	};
 
-	auto *pathToRepair = ( tryPathRepair && registry.valid(QTPFS::entity(searchID)) )
-			? registry.try_get<IPath>(QTPFS::entity(searchID)) : nullptr;
+	// auto *pathToRepair = ( tryPathRepair && registry.valid(QTPFS::entity(searchID)) )
+	// 		? registry.try_get<IPath>(QTPFS::entity(searchID)) : nullptr; // FIXME: race condition
 
 	// Path repairs need only search to the point of finding the beginning of the renaming clean part of the old path.
 	// Such searches are also restricted in the area they can search to avoid creating poor paths that would be better
@@ -191,7 +191,7 @@ void QTPFS::PathSearch::InitializeThread(SearchThreadData* threadData) {
 			&& (pathToRepair->GetFirstNodeIdOfCleanPath() > 0)
 			&& (pathToRepair->GetFirstNodeIdOfCleanPath() < (pathToRepair->GetGoodNodeCount() - 1) )
 			&& (pathToRepair->IsFullPath()
-					|| pathToRepair->GetRepathTriggerIndex() == 0
+					|| pathToRepair->GetRepathTriggerIndex() == 0 // FIXME: race condtion - should be fixed now
 					|| isRemainingPathLongEnoughForRetrigger(pathToRepair) );
 
 	auto getTgtNode = [this, &fwd, pathToRepair](bool doPathRepair) {
@@ -436,8 +436,8 @@ void QTPFS::PathSearch::LoadPartialPath(IPath* path) {
 	expectIncompletePartialSearch = (badNodeCount > 0);
 }
 
-void QTPFS::PathSearch::LoadRepairPath() {
-	const auto *pathToRepair = registry.try_get<IPath>(QTPFS::entity(searchID));
+void QTPFS::PathSearch::LoadRepairPath(IPath* pathToRepair) {
+	// const auto *pathToRepair = registry.try_get<IPath>(QTPFS::entity(searchID)); // FIXME: race condition
 
 	const uint32_t firstCleanNodeId = pathToRepair->GetFirstNodeIdOfCleanPath();
 	const uint32_t nodeCount = pathToRepair->GetGoodNodeCount();
@@ -1306,6 +1306,7 @@ bool QTPFS::PathSearch::ExecuteRawSearch() {
 	auto& fwd = directionalSearchData[SearchThreadData::SEARCH_FORWARD];
 
 	int2 nearestSquare;
+	// FIXME: pathOwner->moveDef could be changed from path request creation
 	haveFullPath = moveDefHandler.GetMoveDefByPathType(nodeLayer->GetNodelayer())
 			->DoRawSearch( pathOwner, pathOwner->moveDef, fwd.srcPoint, fwd.tgtPoint, goalDistance
 						 , true, true, false, nullptr, nullptr, &nearestSquare, searchThreadData->threadId);
@@ -2627,7 +2628,7 @@ bool QTPFS::PathSearch::SharedFinalize(const IPath* srcPath, IPath* dstPath) {
 	dstPath->SetHasFullPath(srcPath->IsFullPath());
 	dstPath->SetHasPartialPath(srcPath->IsPartialPath());
 	dstPath->SetSearchTime(srcPath->GetSearchTime());
-	dstPath->SetRepathTriggerIndex(srcPath->GetRepathTriggerIndex());
+	dstPath->SetRepathTriggerIndex(srcPath->GetRepathTriggerIndex()); // FIXME: this may race - should be safe now.
 	dstPath->SetGoalPosition(goalPos);
 	dstPath->SetIsRawPath(srcPath->IsRawPath());
 
