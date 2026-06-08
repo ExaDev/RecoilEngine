@@ -102,8 +102,8 @@ bool QTPFS::NodeLayer::Update(UpdateThreadData& threadData) {
 	const SRectangle& r = threadData.areaRelinkedInner;
 	const MoveDef* md = threadData.moveDef;
 
-	//assert( r.GetWidth()  == QTPFS_MAP_DAMAGE_SIZE );
-	//assert( r.GetHeight() == QTPFS_MAP_DAMAGE_SIZE );
+	assert( r.GetWidth() != 0 );
+	assert( r.GetHeight() != 0 );
 
 	auto &blockRect = threadData.areaMaxBlockBits;
 	auto &blockBits = threadData.maxBlockBits;
@@ -156,8 +156,13 @@ bool QTPFS::NodeLayer::Update(UpdateThreadData& threadData) {
 		return CMoveMath::RangeIsBlockedHashedMt(xmin, xmax, zmin, zmax, &virtualObject, tempNum, threadData.threadId);
 	};
 
-	bool updateRequired = false;
-	auto& sectorCache = mapSquareStatusCache[GetSectorIndex(r.x1, r.z1)];
+	// Due to optimizations, tiles are forced to QTPFS_MAP_DAMAGE_SIZE. If the update area is larger than that, then
+	// this is the initial build of the quad tree.
+	const bool isInitialUpdate = (r.GetWidth() > QTPFS_MAP_DAMAGE_SIZE) || (r.GetHeight() > QTPFS_MAP_DAMAGE_SIZE);
+
+	// Initial updates always require updates. After that it may not always be the case.
+	bool updateRequired = isInitialUpdate;
+	QTPFS::NodeLayer::NodeSpeedBinCache* sectorCache = &mapSquareStatusCache[GetSectorIndex(r.x1, r.z1)];
 
 	// divide speed-modifiers into bins
 	unsigned int recIdx =  0;
@@ -203,8 +208,19 @@ bool QTPFS::NodeLayer::Update(UpdateThreadData& threadData) {
 
 			const bool isExitOnlyZone = md->IsInExitOnly(chmx, chmz);
 			MapSquareData curSquareState(curSpeedBins[recIdx], isExitOnlyZone);
-			if (curSquareState != sectorCache[recIdx]) {
-				sectorCache[recIdx] = curSquareState;
+
+			unsigned int cacheIdx =  recIdx;
+
+			// The initial map update will span across multiple status cache sectors.
+			// Afterwards this updates only impact a single sector.
+			if (isInitialUpdate){
+				sectorCache = &mapSquareStatusCache[GetSectorIndex(hmx, hmz)];
+				cacheIdx = hmx % NODE_CACHE_SECTOR_STRIDE + (hmz % NODE_CACHE_SECTOR_STRIDE) * NODE_CACHE_SECTOR_STRIDE;
+			}
+
+			if (curSquareState != (*sectorCache)[cacheIdx]) {
+				assert( cacheIdx < NODE_CACHE_SECTOR_SIZE );
+				(*sectorCache)[cacheIdx] = curSquareState;
 				updateRequired = true;
 			}
 		}
