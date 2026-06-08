@@ -90,8 +90,27 @@ void QTPFS::NodeLayer::Clear() {
 	mapSquareStatusCache.clear();
 }
 
+bool QTPFS::NodeLayer::InitialUpdate(UpdateThreadData& threadData) {
+	const SRectangle& r = threadData.areaRelinkedInner;
+	assert( r.GetWidth() != 0 );
+	assert( r.GetHeight() != 0 );
 
-bool QTPFS::NodeLayer::Update(UpdateThreadData& threadData) {
+	return Update(threadData, true);
+}
+
+bool QTPFS::NodeLayer::IncrementalUpdate(UpdateThreadData& threadData) {
+	const SRectangle& r = threadData.areaRelinkedInner;
+
+	// Due to strength of the invariants on the update areas during the match, we have these two functions wrapping
+	// Update().
+	assert( r.GetWidth() == QTPFS_MAP_DAMAGE_SIZE );
+	assert( r.GetHeight() == QTPFS_MAP_DAMAGE_SIZE );
+
+	return Update(threadData, false);
+}
+
+
+bool QTPFS::NodeLayer::Update(UpdateThreadData& threadData, bool isInitialUpdate) {
 	RECOIL_DETAILED_TRACY_ZONE;
 	// assert((luSpeedMods == nullptr && luBlockBits == nullptr) || (luSpeedMods != nullptr && luBlockBits != nullptr));
 
@@ -101,9 +120,6 @@ bool QTPFS::NodeLayer::Update(UpdateThreadData& threadData) {
 	// nodes have divided they will never again grow larger than 16x16 squares in a match.
 	const SRectangle& r = threadData.areaRelinkedInner;
 	const MoveDef* md = threadData.moveDef;
-
-	assert( r.GetWidth() != 0 );
-	assert( r.GetHeight() != 0 );
 
 	auto &blockRect = threadData.areaMaxBlockBits;
 	auto &blockBits = threadData.maxBlockBits;
@@ -155,10 +171,6 @@ bool QTPFS::NodeLayer::Update(UpdateThreadData& threadData) {
 		
 		return CMoveMath::RangeIsBlockedHashedMt(xmin, xmax, zmin, zmax, &virtualObject, tempNum, threadData.threadId);
 	};
-
-	// Due to optimizations, tiles are forced to QTPFS_MAP_DAMAGE_SIZE. If the update area is larger than that, then
-	// this is the initial build of the quad tree.
-	const bool isInitialUpdate = (r.GetWidth() > QTPFS_MAP_DAMAGE_SIZE) || (r.GetHeight() > QTPFS_MAP_DAMAGE_SIZE);
 
 	// Initial updates always require updates. After that it may not always be the case.
 	bool updateRequired = isInitialUpdate;
