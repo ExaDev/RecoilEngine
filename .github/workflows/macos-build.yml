@@ -161,7 +161,7 @@ jobs:
           mkdir -p "$APP/Contents/Resources/share"
           mkdir -p "$APP/Contents/Resources/doc"
 
-          cp ./spring "$APP/Contents/Resources/bin/spring"
+          cp -f ./spring "$APP/Contents/Resources/bin/spring"
           # Engine shared libs that the binary dlopens or links to.
           if [ -d ./lib ]; then
             cp -R ./lib/. "$APP/Contents/Resources/lib/"
@@ -183,17 +183,17 @@ jobs:
           # via VK_DRIVER_FILES / VK_ICD_FILENAMES at runtime.
           mkdir -p "$APP/Contents/Resources/share/vulkan/icd.d"
           if [ -f "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" ]; then
-            cp "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" \
+            cp -f "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" \
                "$APP/Contents/Resources/share/vulkan/icd.d/"
           fi
           # The actual libMoltenVK / KosmicKrisp dylib referenced by
           # the ICD. Copy whatever the ICD points at.
           if [ -f "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" ]; then
-            cp "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" \
+            cp -f "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" \
                "$APP/Contents/Resources/lib/"
           fi
           if [ -f "$MOLTEN_PREFIX/lib/libMoltenVK.dylib" ]; then
-            cp "$MOLTEN_PREFIX/lib/libMoltenVK.dylib" \
+            cp -f "$MOLTEN_PREFIX/lib/libMoltenVK.dylib" \
                "$APP/Contents/Resources/lib/"
           fi
 
