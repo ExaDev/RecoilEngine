@@ -174,11 +174,10 @@ jobs:
           # installing Homebrew packages.
           MESA_PREFIX="$(brew --prefix mesa)"
           MOLTEN_PREFIX="$(brew --prefix molten-vk)"
-          cp "$MESA_PREFIX/lib/libEGL.dylib" "$APP/Contents/Resources/lib/"
-          cp "$MESA_PREFIX/lib/libGL.dylib"  "$APP/Contents/Resources/lib/"
-          # Bring along the rest of the Mesa stack the engine touches.
+          # Bring along the full Mesa stack the engine touches.
+          # Use -f to handle Homebrew read-only keg permissions.
           for dylib in "$MESA_PREFIX/lib/"lib*.dylib; do
-            cp "$dylib" "$APP/Contents/Resources/lib/"
+            cp -f "$dylib" "$APP/Contents/Resources/lib/"
           done
           # MoltenVK / KosmicKrisp ICD. The engine locates Vulkan
           # via VK_DRIVER_FILES / VK_ICD_FILENAMES at runtime.
