@@ -61,6 +61,20 @@ jobs:
           submodules: recursive
           path: src
 
+      - name: Checkout game content (Beyond-All-Reason)
+        uses: actions/checkout@v6
+        with:
+          repository: ExaDev/Beyond-All-Reason
+          ref: macos-port
+          path: game-data
+
+      - name: Checkout lobby (BYAR-Chobby)
+        uses: actions/checkout@v6
+        with:
+          repository: ExaDev/BYAR-Chobby
+          ref: macos-port
+          path: lobby
+
       - name: Show toolchain
         run: |
           sw_vers
@@ -272,28 +286,87 @@ jobs:
           # break the code-signed bundle seal.
           rsync -a --exclude='.*' ../src/doc/site/ "$APP/Contents/Resources/doc/" 2>/dev/null || true
 
-          # Launcher: cd into the bundle's Resources dir, then exec
-          # the engine. Anything the engine writes (logs, savegames,
-          # downloaded game data) lands under the user's Library/
-          # Application Support so the .app bundle stays read-only.
-          cat > "$APP/Contents/MacOS/$APP_NAME" <<'LAUNCHER'
+          # ---- Bundle game content ----
+          # The engine finds games in the "games" subdirectory of its
+          # writeable data dir. We use --isolation-dir to point at the
+          # bundled data so the engine finds game content inside the
+          # .app. Game content is stored as .sdd directories (Spring
+          # Data Directory: a directory containing modinfo.lua and all
+          # game files). Version is derived from the short SHA for
+          # reproducibility.
+          GAME_DIR="$APP/Contents/Resources/game"
+          mkdir -p "$GAME_DIR/games"
+
+          # Version string from game content commit.
+          GAME_VERSION="macos-$(cd ../game-data && git rev-parse --short HEAD)"
+          LOBBY_VERSION="macos-$(cd ../lobby && git rev-parse --short HEAD)"
+
+          # Package Beyond-All-Reason game content as .sdd directory.
+          # Exclude dev-only files that bloat the bundle.
+          GAME_SDD="$GAME_DIR/games/Beyond All Reason $GAME_VERSION"
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.gitignore' \
+            --exclude='*.md' \
+            --exclude='spec/' \
+            --exclude='tools/' \
+            --exclude='lux.*' \
+            --exclude='singleplayer/' \
+            ../game-data/ "$GAME_SDD/"
+          # Replace $VERSION placeholder in modinfo.lua.
+          sed -i.bak "s/\\\$VERSION/$GAME_VERSION/g" "$GAME_SDD/modinfo.lua"
+          rm -f "$GAME_SDD/modinfo.lua.bak"
+
+          # Package BYAR-Chobby lobby as .sdd directory.
+          LOBBY_SDD="$GAME_DIR/games/BYAR Chobby $LOBBY_VERSION"
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.gitignore' \
+            --exclude='*.md' \
+            --exclude='autotest.sh' \
+            --exclude='workflows/' \
+            --exclude='dist_cfg/' \
+            ../lobby/ "$LOBBY_SDD/"
+          # Replace $VERSION placeholder in modinfo.lua.
+          sed -i.bak "s/\\\$VERSION/$LOBBY_VERSION/g" "$LOBBY_SDD/modinfo.lua"
+          rm -f "$LOBBY_SDD/modinfo.lua.bak"
+
+          echo "Game content staged:"
+          echo "  Game: Beyond All Reason $GAME_VERSION"
+          echo "  Lobby: BYAR Chobby $LOBBY_VERSION"
+
+          # Launcher: the engine runs in isolation mode with the game
+          # data directory inside the bundle. User data (logs, configs,
+          # downloaded maps) goes to Library/Application Support.
+          cat > "$APP/Contents/MacOS/$APP_NAME" <<LAUNCHER
           #!/bin/bash
           set -e
-          APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-          RES="$APP_DIR/Resources"
-          export SPRING_BAR_DATA="$HOME/Library/Application Support/$APP_NAME"
-          mkdir -p "$SPRING_BAR_DATA"
+          APP_DIR="\$(cd "\$(dirname "\$0")/.." && pwd)"
+          RES="\$APP_DIR/Resources"
+          GAME_DIR="\$RES/game"
+          USER_DATA="\$HOME/Library/Application Support/$APP_NAME"
+          mkdir -p "\$USER_DATA"
+          # Engine data dir: user-writable area for configs/logs.
+          # --isolation-dir restricts the data scanner to one directory,
+          # which we set to the bundled game content. We symlink games/
+          # into the user data area so the engine can also find any
+          # additional maps or resources the user downloads.
+          GAMES_LINK="\$USER_DATA/games"
+          if [ ! -e "\$GAMES_LINK" ]; then
+            ln -s "\$GAME_DIR/games" "\$GAMES_LINK"
+          fi
           # The engine needs to find its bundled Mesa + Vulkan libs.
-          export DYLD_LIBRARY_PATH="$RES/lib:${DYLD_LIBRARY_PATH:-}"
-          export DYLD_FRAMEWORK_PATH="$RES/lib:${DYLD_FRAMEWORK_PATH:-}"
+          export DYLD_LIBRARY_PATH="\$RES/lib:\${DYLD_LIBRARY_PATH:-}"
+          export DYLD_FRAMEWORK_PATH="\$RES/lib:\${DYLD_FRAMEWORK_PATH:-}"
           # Vulkan loader looks here for the KosmicKrisp / MoltenVK ICD.
-          export VK_DRIVER_FILES="$RES/share/vulkan/icd.d/MoltenVK_icd.json"
-          export VK_ICD_FILENAMES="$RES/share/vulkan/icd.d/MoltenVK_icd.json"
-          export VULKAN_SDK="$RES"
-          # PR #2991 environment knobs (all default to no-op upstream;
-          # listed here so the user can override if needed).
-          cd "$RES"
-          exec "$RES/bin/spring" "$@"
+          export VK_DRIVER_FILES="\$RES/share/vulkan/icd.d/MoltenVK_icd.json"
+          export VK_ICD_FILENAMES="\$RES/share/vulkan/icd.d/MoltenVK_icd.json"
+          export VULKAN_SDK="\$RES"
+          cd "\$RES"
+          exec "\$RES/bin/spring" \\
+            --isolation-dir "\$GAME_DIR" \\
+            --menu "BYAR Chobby $LOBBY_VERSION" \\
+            "\$@"
           LAUNCHER
           chmod +x "$APP/Contents/MacOS/$APP_NAME"
 
