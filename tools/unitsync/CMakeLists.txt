@@ -62,12 +62,12 @@ set(main_files
 	"${ENGINE_SRC_ROOT}/Game/GameVersion.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaConstEngine.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaEncoding.cpp"
+	"${ENGINE_SRC_ROOT}/Lua/LuaLibs.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaMathExtra.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaMemPool.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaParser.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaUtils.cpp"
 	"${ENGINE_SRC_ROOT}/Lua/LuaIO.cpp"
-	"${ENGINE_SRC_ROOT}/Lua/LuaLibs.cpp"
 	"${ENGINE_SRC_ROOT}/Map/MapParser.cpp"
 	"${ENGINE_SRC_ROOT}/Map/SMF/SMFMapFile.cpp"
 	"${ENGINE_SRC_ROOT}/Sim/Misc/SideParser.cpp"
@@ -110,7 +110,6 @@ if (WIN32)
 elseif (APPLE)
 	list(APPEND main_files "${ENGINE_SRC_ROOT}/System/Platform/Mac/CpuTopology.cpp")
 	list(APPEND main_files "${ENGINE_SRC_ROOT}/System/Platform/Linux/Hardware.cpp")
-	list(APPEND main_files "${ENGINE_SRC_ROOT}/System/Platform/Linux/ThreadSupport.cpp")
 	list(APPEND main_files "${ENGINE_SRC_ROOT}/System/Platform/SharedLib.cpp")
 	list(APPEND main_files "${ENGINE_SRC_ROOT}/System/Platform/Linux/SoLib.cpp")
 else ()

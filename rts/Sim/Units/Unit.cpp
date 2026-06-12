@@ -63,7 +63,6 @@
 #include "System/Log/ILog.h"
 #include "System/Matrix44f.h"
 #include "System/SpringMath.h"
-#include "System/Cpp23Compat.hpp"
 #include "System/creg/DefTypes.h"
 #include "System/creg/STL_List.h"
 #include "System/Sound/ISoundChannels.h"
@@ -966,7 +965,14 @@ static auto SplitResourcePackIntoPositiveNegative (const SResourcePack &pack)
 {
 	SResourcePack positive {0.0f}, negative {0.0f};
 
-	for (auto [resourceID, value] : Recoil::enumerate(pack)) {
+#if defined(__APPLE__)
+	// libc++ on older Apple Clang lacks std::views::enumerate (C++23, P2164).
+	// Fall back to an index-based loop on macOS.
+	for (int resourceID = 0; resourceID < SResourcePack::MAX_RESOURCES; ++resourceID) {
+		const auto value = pack.res[resourceID];
+#else
+	for (auto [resourceID, value] : std::views::enumerate (pack)) {
+#endif
 		if (value < 0.0f)
 			negative[resourceID] = -value;
 		else
