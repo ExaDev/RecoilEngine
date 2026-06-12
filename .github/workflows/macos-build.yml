@@ -55,7 +55,7 @@ jobs:
 
     steps:
       - name: Checkout engine
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: recursive
@@ -103,7 +103,7 @@ jobs:
             ccache
 
       - name: Cache ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.ccache
           key: ccache-macos-arm64-${{ runner.os }}-${{ github.sha }}
@@ -303,7 +303,7 @@ jobs:
           ls -lah "$RUNNER_TEMP/$DMG_NAME"
 
       - name: Upload .app and .dmg
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: beyond-all-reason-macos-arm64
           path: |
