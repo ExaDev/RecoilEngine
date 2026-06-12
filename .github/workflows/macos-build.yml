@@ -272,8 +272,7 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
 
-          # Generate a self-signed cert with the Code Signing EKU
-          # (1.3.6.1.5.5.7.3.3) so codesign accepts it.
+          # Generate a self-signed cert with the Code Signing EKU.
           cat > /tmp/codesign-ext.cnf <<EOF
           [req]
           distinguished_name = req_dn
@@ -302,6 +301,14 @@ jobs:
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -k "$KEYCHAIN_PW" "$KEYCHAIN"
+
+          # Add the self-signed cert as a trusted root so codesign
+          # considers it a valid identity.
+          sudo security add-trusted-cert -d -r trustRoot \
+            -k /Library/Keychains/System.keychain /tmp/cert.pem
+
+          # Add the custom keychain to the search list.
+          security list-keychains -s "$KEYCHAIN" "$(security list-keychains | tr -d '"')"
 
           # Verify the identity is visible.
           security find-identity -v "$KEYCHAIN"
