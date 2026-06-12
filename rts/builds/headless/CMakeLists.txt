@@ -64,6 +64,14 @@ target_link_libraries(GameHeadless PRIVATE
 add_executable(engine-headless ${engineSources} ${ENGINE_ICON})
 target_link_libraries(engine-headless no-sound ${engineHeadlessLibraries} GameHeadless no-sound)
 
+# macOS: libplatform_sources.a pulls in rts/System/Platform/Mac/MetalPresent.mm
+# (Objective-C++ for the CAMetalLayer present path). The headless build
+# never invokes that code, but the linker still needs the Objective-C
+# runtime to resolve symbols like _objc_msgSend / _objc_alloc_init.
+if(APPLE)
+	target_link_libraries(engine-headless "-lobjc")
+endif()
+
 # macOS ld uses single-pass symbol resolution. GameHeadless references symbols from
 # libraries listed earlier (gflags, streflop, etc.) that were skipped on first pass.
 # Re-list common libraries so they resolve against GameHeadless.
