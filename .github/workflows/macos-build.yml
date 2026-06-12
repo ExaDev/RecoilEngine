@@ -150,6 +150,51 @@ jobs:
           otool -L ./spring | head -20
           ./spring --help 2>&1 | head -20 || true
 
+      - name: Create self-signed code identity
+        run: |
+          # Create a dedicated Keychain and a self-signed certificate
+          # so codesign produces a proper signature (not ad-hoc). This
+          # avoids the "Apple could not verify" Gatekeeper block — the
+          # user sees "unidentified developer" instead, which is easier
+          # to bypass via System Settings > Privacy & Security > Open Anyway.
+          KEYCHAIN=macos-build.keychain
+          KEYCHAIN_PW="$(openssl rand -hex 16)"
+          CERT_NAME="ExaDev Local Build"
+
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+
+          # Generate a self-signed code-signing certificate (RSA 2048, 1 year).
+          openssl req -x509 -newkey rsa:2048 \
+            -keyout /tmp/cert-key.pem \
+            -out /tmp/cert.pem \
+            -days 365 -nodes \
+            -subj "/CN=$CERT_NAME/O=ExaDev"
+
+          openssl pkcs12 -export \
+            -out /tmp/cert.p12 \
+            -inkey /tmp/cert-key.pem \
+            -in /tmp/cert.pem \
+            -password pass:"$KEYCHAIN_PW"
+
+          security import /tmp/cert.p12 \
+            -k "$KEYCHAIN" \
+            -P "$KEYCHAIN_PW" \
+            -T /usr/bin/codesign
+
+          # Trust the cert for code signing so codesign accepts it.
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -k "$KEYCHAIN_PW" \
+            "$KEYCHAIN"
+
+          # Make it the default keychain for subsequent steps.
+          security list-keychains -s "$KEYCHAIN"
+          security default-keychain -s "$KEYCHAIN"
+
+          echo "CERT_NAME=$CERT_NAME" >> "$GITHUB_ENV"
+
       - name: Stage .app bundle
         working-directory: build
         run: |
@@ -260,10 +305,12 @@ jobs:
           </plist>
           PLIST
 
-          # Ad-hoc sign so the bundle is launchable on a stock Mac
-          # without Gatekeeper complaints. Replace with a Developer ID
-          # identity for distribution outside the team.
-          codesign --force --deep --sign - "$APP"
+          # Sign with the self-signed cert created in the previous step.
+          # Sign inner binaries first, then the bundle, to satisfy --deep.
+          codesign --force --sign "$CERT_NAME" \
+            "$APP/Contents/Resources/bin/spring" \
+            "$APP/Contents/MacOS/$APP_NAME"
+          codesign --force --deep --sign "$CERT_NAME" "$APP"
           echo "Bundle staged: $APP"
           find "$APP" -maxdepth 3 -print | head -20
 
