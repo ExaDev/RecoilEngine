@@ -76,9 +76,10 @@ jobs:
         with:
           path: |
             /opt/homebrew/Cellar
+            /opt/homebrew/opt
             /opt/homebrew/lib
             /opt/homebrew/include
-          key: brew-macos-arm64-${{ hashFiles('.github/workflows/macos-build.yml') }}
+          key: brew-macos-arm64-v1
           restore-keys: |
             brew-macos-arm64-
 
