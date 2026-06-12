@@ -215,7 +215,7 @@ jobs:
           for dep in $(otool -L "$ENGINE" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
             if [ -f "$dep" ]; then
               process_dylib "$dep"
-              local dep_base="$(basename "$dep")"
+              dep_base="$(basename "$dep")"
               install_name_tool -change "$dep" "$PREFIX/$dep_base" "$ENGINE"
             fi
           done
