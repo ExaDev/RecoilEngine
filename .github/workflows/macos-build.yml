@@ -196,6 +196,9 @@ jobs:
             local src="$1"
             local base="$(basename "$src")"
             local dest="$LIBDIR/$base"
+            # dep and dep_base must be local so the recursive for
+            # loop doesn't clobber the caller's dep variable.
+            local dep dep_base
             if [ -f "$dest" ]; then return; fi
             cp -f "$src" "$dest"
             # Set the dylib's own install name to the bundled path.
@@ -204,7 +207,7 @@ jobs:
             for dep in $(otool -L "$dest" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
               if [ -f "$dep" ]; then
                 process_dylib "$dep"
-                local dep_base="$(basename "$dep")"
+                dep_base="$(basename "$dep")"
                 install_name_tool -change "$dep" "$PREFIX/$dep_base" "$dest"
               fi
             done
@@ -219,6 +222,15 @@ jobs:
               install_name_tool -change "$dep" "$PREFIX/$dep_base" "$ENGINE"
             fi
           done
+
+          # Verify no absolute Homebrew paths remain in the engine binary.
+          REMAINING=$(otool -L "$ENGINE" | grep -c '/opt/homebrew/' || true)
+          if [ "$REMAINING" -ne 0 ]; then
+            echo "::error::${REMAINING} unrewritten /opt/homebrew paths remain in engine binary"
+            otool -L "$ENGINE" | grep '/opt/homebrew/'
+            exit 1
+          fi
+          echo "All Homebrew deps rewritten to @executable_path-relative paths"
 
           # Add @rpath so the engine finds libs relative to itself.
           install_name_tool -add_rpath "$PREFIX" "$ENGINE" 2>/dev/null || true
