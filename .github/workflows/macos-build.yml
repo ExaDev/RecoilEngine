@@ -346,11 +346,17 @@ jobs:
                   "$APP/Contents/Resources/share/games/spring/"
           fi
 
-          # Create a DMG. -fs HFS+ keeps the .dmg readable everywhere;
-          # zlib-compressed; sized for ~256 MB so the .app + game
-          # data downloader comfortably fit.
+          # Create a DMG with the standard macOS installer layout:
+          # the .app alongside a symlink to /Applications so the user
+          # can drag it across.
+          DMG_STAGING="$RUNNER_TEMP/dmg-staging"
+          rm -rf "$DMG_STAGING"
+          mkdir -p "$DMG_STAGING"
+          cp -R "$APP" "$DMG_STAGING/"
+          ln -s /Applications "$DMG_STAGING/Applications"
+
           hdiutil create -ov -volname "$APP_NAME" -fs HFS+ \
-            -srcfolder "$APP" -format UDZO \
+            -srcfolder "$DMG_STAGING" -format UDZO \
             -imagekey zlib-level=9 \
             "$RUNNER_TEMP/$DMG_NAME"
 
