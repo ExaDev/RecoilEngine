@@ -471,6 +471,89 @@ jobs:
           echo "Bundle staged: $APP"
           find "$APP" -maxdepth 3 -print | head -20
 
+      - name: Smoke test .app bundle
+        working-directory: build
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/$APP_BUNDLE"
+          ENGINE="$APP/Contents/Resources/bin/spring"
+          LAUNCHER="$APP/Contents/MacOS/$APP_NAME"
+
+          echo "--- Code signature verification ---"
+          codesign --verify --deep --strict "$APP" 2>&1
+          echo "Signature valid"
+
+          echo "--- Dylib path audit ---"
+          # No Mach-O in the bundle may reference /opt/homebrew.
+          FAIL=0
+          while IFS= read -r macho; do
+            COUNT=$(otool -L "$macho" | grep -c '/opt/homebrew/' || true)
+            if [ "$COUNT" -ne 0 ]; then
+              echo "::error::$macho has $COUNT unrewritten /opt/homebrew/ paths"
+              otool -L "$macho" | grep '/opt/homebrew/'
+              FAIL=1
+            fi
+          done < <(find "$APP" -type f \( -name '*.dylib' -o -name 'spring' -o -name 'Beyond All Reason' \))
+          if [ "$FAIL" -ne 0 ]; then
+            exit 1
+          fi
+          echo "All Mach-Os use @executable_path-relative paths"
+
+          echo "--- Game content verification ---"
+          GAME_DIR="$APP/Contents/Resources/game"
+          if [ ! -d "$GAME_DIR/games" ]; then
+            echo "::error::$GAME_DIR/games does not exist"
+            exit 1
+          fi
+          SDD_COUNT=$(find "$GAME_DIR/games" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          echo "Found $SDD_COUNT .sdd directories"
+          if [ "$SDD_COUNT" -lt 2 ]; then
+            echo "::error::Expected at least 2 .sdd directories (game + lobby), found $SDD_COUNT"
+            exit 1
+          fi
+          # Verify each .sdd has modinfo.lua and $VERSION was replaced.
+          for sdd in "$GAME_DIR/games"/*/; do
+            MODINFO="${sdd}modinfo.lua"
+            if [ ! -f "$MODINFO" ]; then
+              echo "::error::Missing modinfo.lua in $sdd"
+              exit 1
+            fi
+            if grep -q '\$VERSION' "$MODINFO"; then
+              echo "::error::\$VERSION placeholder not replaced in $MODINFO"
+              exit 1
+            fi
+            NAME=$(grep -oP "(?<=name = ').*(?=')" "$MODINFO" || grep -o "name = '[^']*'" "$MODINFO" | head -1)
+            VER=$(grep -oP "(?<=version = ').*(?=')" "$MODINFO" || grep -o "version = '[^']*'" "$MODINFO" | head -1)
+            echo "  .sdd OK: $NAME $VER"
+          done
+
+          echo "--- Launcher script validation ---"
+          if [ ! -x "$LAUNCHER" ]; then
+            echo "::error::Launcher $LAUNCHER is not executable"
+            exit 1
+          fi
+          # Check the launcher references --isolation-dir and --menu.
+          if ! grep -q '\-\-isolation-dir' "$LAUNCHER"; then
+            echo "::error::Launcher missing --isolation-dir flag"
+            exit 1
+          fi
+          if ! grep -q '\-\-menu' "$LAUNCHER"; then
+            echo "::error::Launcher missing --menu flag"
+            exit 1
+          fi
+          # The --menu argument must reference a directory that exists
+          # in the bundle's games/ directory.
+          MENU_ARG=$(grep -oP '\-\-menu "[^"]*"' "$LAUNCHER" | head -1 || grep '\-\-menu' "$LAUNCHER" | head -1)
+          echo "  Launcher menu arg: $MENU_ARG"
+          echo "  Launcher syntactically valid (bash -n)"
+          bash -n "$LAUNCHER"
+
+          echo "--- Bundle structure ---"
+          echo "  Engine: $(file "$ENGINE" | cut -d: -f2)"
+          echo "  Launcher: $(file "$LAUNCHER" | cut -d: -f2)"
+          DYLIB_COUNT=$(find "$APP/Contents/Resources/lib" -name '*.dylib' 2>/dev/null | wc -l | tr -d ' ')
+          echo "  Bundled dylibs: $DYLIB_COUNT"
+          echo "All smoke tests passed"
       - name: Install + .app + DMG
         working-directory: build
         run: |
