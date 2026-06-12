@@ -595,12 +595,10 @@ jobs:
 
           ls -lah "$RUNNER_TEMP/$DMG_NAME"
 
-      - name: Upload .app and .dmg
+      - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
           name: beyond-all-reason-macos-arm64
-          path: |
-            ${{ runner.temp }}/${{ env.APP_BUNDLE }}
-            ${{ runner.temp }}/${{ env.DMG_NAME }}
+          path: ${{ runner.temp }}/${{ env.DMG_NAME }}
           if-no-files-found: error
           retention-days: 14
