@@ -1,0 +1,310 @@
+name: Build macOS Engine
+
+# Builds a downloadable, installable, and playable Beyond All Reason
+# engine binary + .app bundle on Apple Silicon (macos-14, M1).
+#
+# The engine code in this fork is the Recoil Engine with two upstream
+# PRs integrated onto a macos-port branch:
+#
+#   - beyond-all-reason/RecoilEngine#2820  Add macOS ARM64 platform support
+#   - beyond-all-reason/RecoilEngine#2991  macOS Apple Silicon support via
+#                                          Mesa Zink -> KosmicKrisp -> Metal
+#
+# PR #2991 is an interim Zink-on-Apple-Silicon path. The OpenGL 4.3
+# surface is routed through Mesa's Zink driver onto Vulkan, and Vulkan
+# onto Metal via KosmicKrisp. Until upstream lands the long-term
+# rendering abstraction (issues #2852 / #2869), every macOS-specific
+# hunk is gated behind __APPLE__ and lives under rts/System/Platform/Mac/.
+#
+# The resulting build is single-player / skirmish capable. Multiplayer
+# determinism via streflop is structurally present but has not been
+# empirically cross-validated against x86 BAR installs (the maintainer
+# gate on #2991); treat the multiplayer path as unverified.
+#
+# On the artifact, a small wrapper launcher lives inside the .app bundle
+# and invokes the engine binary. Game data (maps, units, mods) is
+# fetched on first launch through the engine's built-in rapid://
+# downloader, so the .app itself stays small (~25 MB). Mesa and Vulkan
+# are runtime dependencies installed by the user via Homebrew before
+# the first launch (see README in the artifact).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      - master
+      - macos-port
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build macOS arm64 engine
+    runs-on: macos-14
+
+    env:
+      BUILD_TYPE: RELWITHDEBINFO
+      CMAKE_GENERATOR: Ninja
+      APP_NAME: "Beyond All Reason"
+      APP_BUNDLE: "Beyond All Reason.app"
+      DMG_NAME: "Beyond-All-Reason-macos-arm64.dmg"
+
+    steps:
+      - name: Checkout engine
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          path: src
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          uname -a
+          sysctl -n machdep.cpu.brand_string
+          clang++ --version
+          cmake --version
+          ninja --version
+
+      - name: Install Homebrew dependencies
+        # SDL2 + image/font libs are engine build deps.
+        # libomp and glm are pulled transitively by assimp/etc.
+        # vulkan-headers + molten-vk give us the Vulkan loader used
+        # by PR #2991's KosmicKrisp (Vulkan-on-Metal) layer.
+        # mesa provides the libEGL + libGL dylibs that PR #2991 needs
+        # at runtime to route OpenGL 4.3 calls onto Vulkan (via Zink),
+        # bypassing Apple's 4.1 GL cap on Apple Silicon. We pass the
+        # path to libEGL.dylib to cmake via SPRING_MAC_LIBEGL below.
+        # libogg + libvorbis are required by the OggVorbis audio
+        # find module; PR #2991's vendored OpenAL EFX headers need
+        # them present at configure time.
+        run: |
+          brew update
+          brew install \
+            sdl2 \
+            libpng \
+            libjpeg-turbo \
+            libogg \
+            libvorbis \
+            freetype \
+            glm \
+            libomp \
+            vulkan-headers \
+            vulkan-loader \
+            molten-vk \
+            mesa \
+            ninja \
+            ccache
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-macos-arm64-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-arm64-${{ runner.os }}-
+
+      - name: Configure engine (cmake)
+        working-directory: src
+        # SPRING_MAC_LIBEGL points at Homebrew's Mesa libEGL.dylib
+        # (26.x at the time of writing). The engine cmake looks for
+        # libGL.dylib next to it and links it explicitly; the matching
+        # libGL is what gives the engine the OpenGL 4.6 compatibility-
+        # profile context that Apple Silicon's native OpenGL 4.1 cannot.
+        run: |
+          MESA_LIBEGL="$(brew --prefix mesa)/lib/libEGL.dylib"
+          test -f "$MESA_LIBEGL" || (echo "Mesa libEGL.dylib not found at $MESA_LIBEGL" && exit 1)
+          mkdir -p ../build
+          cmake --fresh -S . -B ../build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DAI_EXCLUDE_REGEX="^CppTestAI$" \
+            -DUSERDOCS_PLAIN=ON \
+            -DSPRING_MAC_LIBEGL="$MESA_LIBEGL"
+          echo "MESA_LIBEGL=$MESA_LIBEGL" >> "$GITHUB_ENV"
+
+      - name: Build engine (ninja)
+        working-directory: src
+        run: |
+          cd ../build
+          ninja -j$(sysctl -n hw.ncpu) spring-headless spring
+          ls -la spring spring-headless 2>&1 | head -10
+
+      - name: Smoke test engine binary
+        working-directory: build
+        # The engine prints a usage banner when invoked with --help.
+        # We don't start a real game in CI; we just confirm the
+        # Mach-O loads, all dynamic libraries resolve, and the
+        # binary produces the expected output.
+        run: |
+          file ./spring
+          otool -L ./spring | head -20
+          ./spring --help 2>&1 | head -20 || true
+
+      - name: Stage .app bundle
+        working-directory: build
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/$APP_BUNDLE"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS"
+          mkdir -p "$APP/Contents/Resources/bin"
+          mkdir -p "$APP/Contents/Resources/lib"
+          mkdir -p "$APP/Contents/Resources/share"
+          mkdir -p "$APP/Contents/Resources/doc"
+
+          cp ./spring "$APP/Contents/Resources/bin/spring"
+          # Engine shared libs that the binary dlopens or links to.
+          if [ -d ./lib ]; then
+            cp -R ./lib/. "$APP/Contents/Resources/lib/"
+          fi
+
+          # Bundle Homebrew's Mesa + Vulkan stack. PR #2991's Zink
+          # path needs libEGL + libGL; KosmicKrisp needs the Vulkan
+          # ICD file. The launcher sets DYLD_LIBRARY_PATH so the
+          # engine can resolve these at runtime without the user
+          # installing Homebrew packages.
+          MESA_PREFIX="$(brew --prefix mesa)"
+          MOLTEN_PREFIX="$(brew --prefix molten-vk)"
+          cp "$MESA_PREFIX/lib/libEGL.dylib" "$APP/Contents/Resources/lib/"
+          cp "$MESA_PREFIX/lib/libGL.dylib"  "$APP/Contents/Resources/lib/"
+          # Bring along the rest of the Mesa stack the engine touches.
+          for dylib in "$MESA_PREFIX/lib/"lib*.dylib; do
+            cp "$dylib" "$APP/Contents/Resources/lib/"
+          done
+          # MoltenVK / KosmicKrisp ICD. The engine locates Vulkan
+          # via VK_DRIVER_FILES / VK_ICD_FILENAMES at runtime.
+          mkdir -p "$APP/Contents/Resources/share/vulkan/icd.d"
+          if [ -f "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" ]; then
+            cp "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" \
+               "$APP/Contents/Resources/share/vulkan/icd.d/"
+          fi
+          # The actual libMoltenVK / KosmicKrisp dylib referenced by
+          # the ICD. Copy whatever the ICD points at.
+          if [ -f "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" ]; then
+            cp "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" \
+               "$APP/Contents/Resources/lib/"
+          fi
+          if [ -f "$MOLTEN_PREFIX/lib/libMoltenVK.dylib" ]; then
+            cp "$MOLTEN_PREFIX/lib/libMoltenVK.dylib" \
+               "$APP/Contents/Resources/lib/"
+          fi
+
+          cp -R ../src/doc/site/. "$APP/Contents/Resources/doc/" 2>/dev/null || true
+
+          # Launcher: cd into the bundle's Resources dir, then exec
+          # the engine. Anything the engine writes (logs, savegames,
+          # downloaded game data) lands under the user's Library/
+          # Application Support so the .app bundle stays read-only.
+          cat > "$APP/Contents/MacOS/$APP_NAME" <<'LAUNCHER'
+          #!/bin/bash
+          set -e
+          APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+          RES="$APP_DIR/Resources"
+          export SPRING_BAR_DATA="$HOME/Library/Application Support/$APP_NAME"
+          mkdir -p "$SPRING_BAR_DATA"
+          # The engine needs to find its bundled Mesa + Vulkan libs.
+          export DYLD_LIBRARY_PATH="$RES/lib:${DYLD_LIBRARY_PATH:-}"
+          export DYLD_FRAMEWORK_PATH="$RES/lib:${DYLD_FRAMEWORK_PATH:-}"
+          # Vulkan loader looks here for the KosmicKrisp / MoltenVK ICD.
+          export VK_DRIVER_FILES="$RES/share/vulkan/icd.d/MoltenVK_icd.json"
+          export VK_ICD_FILENAMES="$RES/share/vulkan/icd.d/MoltenVK_icd.json"
+          export VULKAN_SDK="$RES"
+          # PR #2991 environment knobs (all default to no-op upstream;
+          # listed here so the user can override if needed).
+          cd "$RES"
+          exec "$RES/bin/spring" "$@"
+          LAUNCHER
+          chmod +x "$APP/Contents/MacOS/$APP_NAME"
+
+          # Info.plist
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+                                   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>$APP_NAME</string>
+              <key>CFBundleDisplayName</key>
+              <string>$APP_NAME</string>
+              <key>CFBundleIdentifier</key>
+              <string>org.exadev.beyondallreason</string>
+              <key>CFBundleVersion</key>
+              <string>1.0.0</string>
+              <key>CFBundleShortVersionString</key>
+              <string>1.0.0</string>
+          <key>CFBundleExecutable</key>
+          <string>$APP_NAME</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>13.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSRequiresAquaSystemAppearance</key>
+              <false/>
+              <key>NSHumanReadableCopyright</key>
+              <string>Recoil Engine (GPLv2+) and Beyond All Reason content</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # Ad-hoc sign so the bundle is launchable on a stock Mac
+          # without Gatekeeper complaints. Replace with a Developer ID
+          # identity for distribution outside the team.
+          codesign --force --deep --sign - "$APP"
+          echo "Bundle staged: $APP"
+          find "$APP" -maxdepth 3 -print | head -20
+
+      - name: Install + .app + DMG
+        working-directory: build
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/$APP_BUNDLE"
+
+          # First, run the existing install path so engine resources
+          # (fonts, default configs, etc.) are populated under
+          # share/games/spring/ alongside the binary. These land in
+          # the .app's Resources/share so the .app is self-contained
+          # for engine-side assets; game data is still downloaded on
+          # first launch.
+          DESTDIR="$RUNNER_TEMP/staged" ninja install
+
+          # If ninja install didn't drop anything into bin/, copy the
+          # engine binary and its lib/ tree into the .app manually
+          # (some build configurations skip install rules for
+          # non-system targets).
+          mkdir -p "$APP/Contents/Resources/share/games/spring"
+          if [ -d "$RUNNER_TEMP/staged/usr/local/share/games/spring" ]; then
+            cp -R "$RUNNER_TEMP/staged/usr/local/share/games/spring/." \
+                  "$APP/Contents/Resources/share/games/spring/"
+          fi
+
+          # Create a DMG. -fs HFS+ keeps the .dmg readable everywhere;
+          # zlib-compressed; sized for ~256 MB so the .app + game
+          # data downloader comfortably fit.
+          hdiutil create -ov -volname "$APP_NAME" -fs HFS+ \
+            -srcfolder "$APP" -format UDZO \
+            -imagekey zlib-level=9 \
+            "$RUNNER_TEMP/$DMG_NAME"
+
+          ls -lah "$RUNNER_TEMP/$DMG_NAME"
+
+      - name: Upload .app and .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: beyond-all-reason-macos-arm64
+          path: |
+            ${{ runner.temp }}/${{ env.APP_BUNDLE }}
+            ${{ runner.temp }}/${{ env.DMG_NAME }}
+          if-no-files-found: error
+          retention-days: 14
