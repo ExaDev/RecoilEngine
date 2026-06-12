@@ -279,7 +279,8 @@ jobs:
           # the .app's Resources/share so the .app is self-contained
           # for engine-side assets; game data is still downloaded on
           # first launch.
-          DESTDIR="$RUNNER_TEMP/staged" ninja install
+          DESTDIR="$RUNNER_TEMP/staged" ninja install-spring-headless || true
+          DESTDIR="$RUNNER_TEMP/staged" ninja install-spring || true
 
           # If ninja install didn't drop anything into bin/, copy the
           # engine binary and its lib/ tree into the .app manually
