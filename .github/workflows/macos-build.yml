@@ -522,8 +522,8 @@ jobs:
               echo "::error::\$VERSION placeholder not replaced in $MODINFO"
               exit 1
             fi
-            NAME=$(grep -oP "(?<=name = ').*(?=')" "$MODINFO" || grep -o "name = '[^']*'" "$MODINFO" | head -1)
-            VER=$(grep -oP "(?<=version = ').*(?=')" "$MODINFO" || grep -o "version = '[^']*'" "$MODINFO" | head -1)
+            NAME=$(awk -F"'" '/name = /{print $2; exit}' "$MODINFO")
+            VER=$(awk -F"'" '/version = /{print $2; exit}' "$MODINFO")
             echo "  .sdd OK: $NAME $VER"
           done
 
@@ -543,7 +543,7 @@ jobs:
           fi
           # The --menu argument must reference a directory that exists
           # in the bundle's games/ directory.
-          MENU_ARG=$(grep -oP '\-\-menu "[^"]*"' "$LAUNCHER" | head -1 || grep '\-\-menu' "$LAUNCHER" | head -1)
+          MENU_ARG=$(grep -- '--menu' "$LAUNCHER" | head -1)
           echo "  Launcher menu arg: $MENU_ARG"
           echo "  Launcher syntactically valid (bash -n)"
           bash -n "$LAUNCHER"
