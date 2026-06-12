@@ -267,7 +267,10 @@ jobs:
             process_dylib "$MOLTEN_PREFIX/lib/libMoltenVK.dylib"
           fi
 
-          cp -R ../src/doc/site/. "$APP/Contents/Resources/doc/" 2>/dev/null || true
+          # Copy docs but exclude dotfiles (like .hugo_build.lock,
+          # .gitignore) that get dropped during artifact upload and
+          # break the code-signed bundle seal.
+          rsync -a --exclude='.*' ../src/doc/site/ "$APP/Contents/Resources/doc/" 2>/dev/null || true
 
           # Launcher: cd into the bundle's Resources dir, then exec
           # the engine. Anything the engine writes (logs, savegames,
@@ -382,7 +385,12 @@ jobs:
           # Verify the identity is visible.
           security find-identity -v "$KEYCHAIN"
 
-          # Sign inner binaries first, then the outer bundle.
+          # Sign all bundled dylibs, the engine binary, the launcher,
+          # and then the outer bundle. macOS's code signing monitor
+          # validates every loaded Mach-O inside a .app bundle, so
+          # every dylib must have a recognised signature.
+          codesign --force --keychain "$KEYCHAIN" --sign "$CERT_NAME" \
+            "$APP/Contents/Resources/lib/"*.dylib
           codesign --force --keychain "$KEYCHAIN" --sign "$CERT_NAME" \
             "$APP/Contents/Resources/bin/spring" \
             "$APP/Contents/MacOS/$APP_NAME"
