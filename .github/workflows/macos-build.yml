@@ -81,7 +81,8 @@ jobs:
         # path to libEGL.dylib to cmake via SPRING_MAC_LIBEGL below.
         # libogg + libvorbis are required by the OggVorbis audio
         # find module; PR #2991's vendored OpenAL EFX headers need
-        # them present at configure time.
+        # them present at configure time. devil (DevIL) is the image
+        # library the engine uses for unit/model texture loading.
         run: |
           brew update
           brew install \
@@ -97,6 +98,7 @@ jobs:
             vulkan-loader \
             molten-vk \
             mesa \
+            devil \
             ninja \
             ccache
 
