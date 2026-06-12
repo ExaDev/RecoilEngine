@@ -272,9 +272,25 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
           security set-keychain-settings -lut 21600 "$KEYCHAIN"
 
+          # Generate a self-signed cert with the Code Signing EKU
+          # (1.3.6.1.5.5.7.3.3) so codesign accepts it.
+          cat > /tmp/codesign-ext.cnf <<EOF
+          [req]
+          distinguished_name = req_dn
+          x509_extensions = v3_ext
+          [req_dn]
+          [v3_ext]
+          basicConstraints = critical, CA:FALSE
+          keyUsage = critical, digitalSignature
+          extendedKeyUsage = critical, codeSigning
+          subjectKeyIdentifier = hash
+          EOF
+
           openssl req -x509 -newkey rsa:2048 \
             -keyout /tmp/cert-key.pem -out /tmp/cert.pem \
-            -days 365 -nodes -subj "/CN=$CERT_NAME/O=ExaDev"
+            -days 365 -nodes \
+            -config /tmp/codesign-ext.cnf \
+            -subj "/CN=$CERT_NAME/O=ExaDev"
 
           openssl pkcs12 -export \
             -out /tmp/cert.p12 -inkey /tmp/cert-key.pem -in /tmp/cert.pem \
@@ -286,6 +302,9 @@ jobs:
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -k "$KEYCHAIN_PW" "$KEYCHAIN"
+
+          # Verify the identity is visible.
+          security find-identity -v "$KEYCHAIN"
 
           # Sign inner binaries first, then the outer bundle.
           codesign --force --keychain "$KEYCHAIN" --sign "$CERT_NAME" \
