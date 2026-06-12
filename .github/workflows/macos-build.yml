@@ -127,6 +127,7 @@ jobs:
             -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
             -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
             -DAI_EXCLUDE_REGEX="^CppTestAI$" \
+            -DAI_TYPES=NONE \
             -DUSERDOCS_PLAIN=ON \
             -DSPRING_MAC_LIBEGL="$MESA_LIBEGL"
           echo "MESA_LIBEGL=$MESA_LIBEGL" >> "$GITHUB_ENV"
