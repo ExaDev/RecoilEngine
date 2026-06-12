@@ -67,9 +67,20 @@ target_link_libraries(engine-headless no-sound ${engineHeadlessLibraries} GameHe
 # macOS: libplatform_sources.a pulls in rts/System/Platform/Mac/MetalPresent.mm
 # (Objective-C++ for the CAMetalLayer present path). The headless build
 # never invokes that code, but the linker still needs the Objective-C
-# runtime to resolve symbols like _objc_msgSend / _objc_alloc_init.
+# runtime, Metal, QuartzCore, and IOSurface frameworks to resolve symbols
+# from MetalPresent.mm.o. Match what the legacy (GUI) build links.
 if(APPLE)
-	target_link_libraries(engine-headless "-lobjc")
+	find_library(COREFOUNDATION_LIBRARY Foundation)
+	find_library(METAL_LIBRARY Metal)
+	find_library(QUARTZCORE_LIBRARY QuartzCore)
+	find_library(IOSURFACE_LIBRARY IOSurface)
+	target_link_libraries(engine-headless
+		${COREFOUNDATION_LIBRARY}
+		${METAL_LIBRARY}
+		${QUARTZCORE_LIBRARY}
+		${IOSURFACE_LIBRARY}
+		objc
+	)
 endif()
 
 # macOS ld uses single-pass symbol resolution. GameHeadless references symbols from
