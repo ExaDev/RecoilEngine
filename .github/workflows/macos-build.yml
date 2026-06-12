@@ -168,34 +168,75 @@ jobs:
             cp -R ./lib/. "$APP/Contents/Resources/lib/"
           fi
 
-          # Bundle Homebrew's Mesa + Vulkan stack. PR #2991's Zink
-          # path needs libEGL + libGL; KosmicKrisp needs the Vulkan
-          # ICD file. The launcher sets DYLD_LIBRARY_PATH so the
-          # engine can resolve these at runtime without the user
-          # installing Homebrew packages.
-          MESA_PREFIX="$(brew --prefix mesa)"
-          MOLTEN_PREFIX="$(brew --prefix molten-vk)"
-          # Bring along the full Mesa stack the engine touches.
-          # Use -f to handle Homebrew read-only keg permissions.
-          for dylib in "$MESA_PREFIX/lib/"lib*.dylib; do
-            cp -f "$dylib" "$APP/Contents/Resources/lib/"
+          # Collect every Homebrew dylib the engine needs (direct +
+          # transitive), copy them into the bundle, and rewrite their
+          # install names so the app is self-contained — the user
+          # should NOT need Homebrew installed to run the app.
+          LIBDIR="$APP/Contents/Resources/lib"
+          PREFIX="@executable_path/../lib"
+
+          # Recursive function: copy a dylib into the bundle and
+          # process its own Homebrew dependencies.
+          process_dylib() {
+            local src="$1"
+            local base="$(basename "$src")"
+            local dest="$LIBDIR/$base"
+            if [ -f "$dest" ]; then return; fi
+            cp -f "$src" "$dest"
+            # Set the dylib's own install name to the bundled path.
+            install_name_tool -id "$PREFIX/$base" "$dest"
+            # Now recurse into this dylib's own Homebrew deps.
+            for dep in $(otool -L "$dest" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"
+                local dep_base="$(basename "$dep")"
+                install_name_tool -change "$dep" "$PREFIX/$dep_base" "$dest"
+              fi
+            done
+          }
+
+          # Seed: the engine binary's direct Homebrew deps.
+          ENGINE="$APP/Contents/Resources/bin/spring"
+          for dep in $(otool -L "$ENGINE" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+            if [ -f "$dep" ]; then
+              process_dylib "$dep"
+              local dep_base="$(basename "$dep")"
+              install_name_tool -change "$dep" "$PREFIX/$dep_base" "$ENGINE"
+            fi
           done
-          # MoltenVK / KosmicKrisp ICD. The engine locates Vulkan
-          # via VK_DRIVER_FILES / VK_ICD_FILENAMES at runtime.
+
+          # Add @rpath so the engine finds libs relative to itself.
+          install_name_tool -add_rpath "$PREFIX" "$ENGINE" 2>/dev/null || true
+
+          # Bundle Mesa's full lib stack (Zink + KosmicKrisp need it).
+          MESA_PREFIX="$(brew --prefix mesa)"
+          for dylib in "$MESA_PREFIX/lib/"lib*.dylib; do
+            base="$(basename "$dylib")"
+            if [ ! -f "$LIBDIR/$base" ]; then
+              cp -f "$dylib" "$LIBDIR/"
+              install_name_tool -id "$PREFIX/$base" "$LIBDIR/$base"
+              for dep in $(otool -L "$LIBDIR/$base" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+                if [ -f "$dep" ]; then
+                  process_dylib "$dep"
+                  dep_base="$(basename "$dep")"
+                  install_name_tool -change "$dep" "$PREFIX/$dep_base" "$LIBDIR/$base"
+                fi
+              done
+            fi
+          done
+
+          # MoltenVK / KosmicKrisp ICD + dylib.
+          MOLTEN_PREFIX="$(brew --prefix molten-vk)"
           mkdir -p "$APP/Contents/Resources/share/vulkan/icd.d"
           if [ -f "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" ]; then
             cp -f "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" \
                "$APP/Contents/Resources/share/vulkan/icd.d/"
           fi
-          # The actual libMoltenVK / KosmicKrisp dylib referenced by
-          # the ICD. Copy whatever the ICD points at.
           if [ -f "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" ]; then
-            cp -f "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" \
-               "$APP/Contents/Resources/lib/"
+            process_dylib "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib"
           fi
           if [ -f "$MOLTEN_PREFIX/lib/libMoltenVK.dylib" ]; then
-            cp -f "$MOLTEN_PREFIX/lib/libMoltenVK.dylib" \
-               "$APP/Contents/Resources/lib/"
+            process_dylib "$MOLTEN_PREFIX/lib/libMoltenVK.dylib"
           fi
 
           cp -R ../src/doc/site/. "$APP/Contents/Resources/doc/" 2>/dev/null || true
