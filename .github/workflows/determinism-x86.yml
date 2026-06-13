@@ -1,6 +1,6 @@
 name: Determinism x86 (cross-platform sync)
 
-# Builds spring-headless for amd64-linux from this exact engine commit,
+# Builds the headless engine for amd64-linux from this exact engine commit,
 # runs a fixed-seed AI-vs-AI game, and records the engine's whole-game
 # sync checksum every frame. The resulting CHKREC stream is the x86_64
 # reference for cross-platform determinism: it must match the arm64
@@ -41,22 +41,37 @@ jobs:
           ref: macos-port
           path: game-data
 
-      - name: Build spring-headless (amd64-linux) in upstream container
+      - name: Cache ccache (amd64-linux container build)
+        uses: actions/cache@v5
+        with:
+          path: src/.cache/ccache-amd64-linux
+          key: det-ccache-amd64-linux-${{ github.sha }}
+          restore-keys: |
+            det-ccache-amd64-linux-
+
+      - name: Build headless engine (amd64-linux) in upstream container
         working-directory: src
         run: |
           set -euo pipefail
           # build.sh blocks unless submodules are acknowledged.
           touch .i-understand-git-submodules.txt
           chmod +x docker-build-v2/build.sh
-          # build.sh runs `docker run -it`; the -t needs a TTY which CI has
-          # not got ("the input device is not a TTY"). Wrap each call in
-          # `script`, which allocates a pseudo-terminal, rather than patch
-          # the upstream tooling.
+          # build.sh runs `docker run -it`; the -t needs a TTY that CI has
+          # not got. Wrap each call in script(1) for a pseudo-terminal
+          # rather than patch the upstream tooling. PLATFORM = amd64-linux,
+          # so outputs land in build-amd64-linux/.
           script -q -e -c "./docker-build-v2/build.sh --configure linux -DCMAKE_BUILD_TYPE=RELWITHDEBINFO -DAI_TYPES=NONE" /dev/null
           script -q -e -c "./docker-build-v2/build.sh --compile linux" /dev/null
-          echo "--- build outputs ---"
-          ls -la build-linux/ | head
-          file build-linux/spring-headless || (echo "::error::spring-headless not built" && exit 1)
+          echo "--- locate headless binary ---"
+          HEADLESS_BIN="$(find build-amd64-linux -maxdepth 3 -type f \( -name 'spring-headless' -o -name 'engine-headless' \) | head -1)"
+          if [ -z "$HEADLESS_BIN" ]; then
+            echo "::error::no headless binary found under build-amd64-linux"
+            find build-amd64-linux -maxdepth 2 -type f -name 'spring*' -o -name 'engine*' 2>/dev/null | head -20
+            exit 1
+          fi
+          echo "HEADLESS_BIN=$HEADLESS_BIN"
+          file "$HEADLESS_BIN"
+          echo "HEADLESS_BIN=$HEADLESS_BIN" >> "$GITHUB_ENV"
 
       - name: Assemble data directory
         working-directory: src
@@ -78,11 +93,11 @@ jobs:
           # Determinism recorder gadget (unsynced, headless-compatible).
           cp -f .github/determinism/det_chkrec.lua "$GAME_SDD/luarules/gadgets/det_chkrec.lua"
 
-          # Base content built by the engine.
-          cp -f build-linux/base/springcontent.sdz "$DATA/games/" 2>/dev/null || cp -f build-linux/base/spring/springcontent.sdz "$DATA/games/"
-          cp -f build-linux/base/spring/bitmaps.sdz "$DATA/games/" 2>/dev/null || true
-          cp -f build-linux/base/maphelper.sdz "$DATA/games/" 2>/dev/null || true
-          cp -f build-linux/base/cursors.sdz "$DATA/games/" 2>/dev/null || true
+          # Base content built by the engine (search the build tree).
+          for sdz in springcontent.sdz bitmaps.sdz maphelper.sdz cursors.sdz; do
+            f="$(find build-amd64-linux -name "$sdz" -type f | head -1)"
+            if [ -n "$f" ]; then cp -f "$f" "$DATA/games/"; echo "base: $sdz"; else echo "::warning::missing base $sdz"; fi
+          done
           ls -la "$DATA/games/"
 
           # Red Comet map (same file the arm64 run used).
@@ -100,22 +115,20 @@ jobs:
           set -euo pipefail
           source docker-build-v2/images_versions.sh
           IMAGE="ghcr.io/beyond-all-reason/recoil-build-amd64-linux@${image_version[amd64-linux]}"
-          docker run --rm \
-            -v "$PWD:/src" -v "$DATA:/data" \
+          # Run the freshly built headless binary inside the build image
+          # (which has all runtime libs). Mount the repo and the data dir.
+          docker run --rm --platform=linux/amd64 \
+            -v "$PWD:/src:ro" -v "$DATA:/data:rw" \
             -w /src "$IMAGE" \
-            bash -c '
-              set -e
-              cd /src
-              timeout 600 ./build-linux/spring-headless --isolation-dir /data /data/det_script.txt 2>&1 | tee /data/run.log | grep -aE "CHKREC|synctest|content_error|Error: Sync|could not" || true
-            '
+            bash -c "set -e; timeout 600 /src/$HEADLESS_BIN --isolation-dir /data /data/det_script.txt 2>&1 | tee /data/run.log | grep -aE 'CHKREC|content_error|Error: Sync|could not|Sync error' || true"
           echo "--- extract checksum stream ---"
           grep -aoE 'CHKREC [0-9]+ [A-Za-z0-9]+' "$DATA/run.log" > "$RUNNER_TEMP/checksums_amd64_linux.txt" || true
           LINES=$(wc -l < "$RUNNER_TEMP/checksums_amd64_linux.txt" || echo 0)
           echo "recorded $LINES checksum lines"
           head -5 "$RUNNER_TEMP/checksums_amd64_linux.txt" || true
           if [ "$LINES" -lt 100 ]; then
-            echo "::error::expected >=300 checksum lines, got $LINES — see run.log"
-            tail -40 "$DATA/run.log" || true
+            echo "::error::expected >=300 checksum lines, got $LINES — see run.log tail"
+            tail -60 "$DATA/run.log" || true
             exit 1
           fi
 
