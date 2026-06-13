@@ -388,9 +388,11 @@ jobs:
           if [ ! -e "\$GAMES_LINK" ]; then
             ln -s "\$GAME_DIR/games" "\$GAMES_LINK"
           fi
-          # The engine needs to find its bundled Mesa + Vulkan libs.
-          export DYLD_LIBRARY_PATH="\$RES/lib:\${DYLD_LIBRARY_PATH:-}"
-          export DYLD_FRAMEWORK_PATH="\$RES/lib:\${DYLD_FRAMEWORK_PATH:-}"
+          # Do NOT set DYLD_LIBRARY_PATH — it overrides the system OpenGL
+          # framework globally, breaking NSOpenGLContext inside SDL2's
+          # Cocoa backend (SIGBUS in +[NSOpenGLContext currentContext]).
+          # Libraries resolve via @executable_path entries in load commands
+          # and @rpath from the engine binary's LC_RPATH instead.
           # Mesa EGL on macOS must use the surfaceless platform because
           # there is no X11 display server. Without this, eglInitialize
           # tries to connect to xcb and fails with EGL_NOT_INITIALIZED.
