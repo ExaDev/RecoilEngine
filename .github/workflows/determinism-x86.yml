@@ -48,9 +48,12 @@ jobs:
           # build.sh blocks unless submodules are acknowledged.
           touch .i-understand-git-submodules.txt
           chmod +x docker-build-v2/build.sh
-          ./docker-build-v2/build.sh --configure linux \
-            -DCMAKE_BUILD_TYPE=RELWITHDEBINFO -DAI_TYPES=NONE
-          ./docker-build-v2/build.sh --compile linux
+          # build.sh runs `docker run -it`; the -t needs a TTY which CI has
+          # not got ("the input device is not a TTY"). Wrap each call in
+          # `script`, which allocates a pseudo-terminal, rather than patch
+          # the upstream tooling.
+          script -q -e -c "./docker-build-v2/build.sh --configure linux -DCMAKE_BUILD_TYPE=RELWITHDEBINFO -DAI_TYPES=NONE" /dev/null
+          script -q -e -c "./docker-build-v2/build.sh --compile linux" /dev/null
           echo "--- build outputs ---"
           ls -la build-linux/ | head
           file build-linux/spring-headless || (echo "::error::spring-headless not built" && exit 1)
