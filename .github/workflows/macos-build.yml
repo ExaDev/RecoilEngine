@@ -273,18 +273,73 @@ jobs:
             fi
           done
 
-          # MoltenVK / KosmicKrisp ICD + dylib.
+          # ---- Vulkan stack for the Zink hardware-rendering path ----
+          # On a real macOS 26 + Apple Silicon machine the engine can
+          # render through Mesa's Zink driver onto the Metal GPU via
+          # KosmicKrisp instead of the llvmpipe software rasteriser. The
+          # launcher (below) activates this at runtime by setting
+          # GALLIUM_DRIVER=zink when it detects macOS 26+. Three things
+          # must be in the bundle for that to work; the previous version
+          # of this step shipped none of them correctly.
           MOLTEN_PREFIX="$(brew --prefix molten-vk)"
-          mkdir -p "$APP/Contents/Resources/share/vulkan/icd.d"
-          if [ -f "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" ]; then
-            cp -f "$MOLTEN_PREFIX/share/vulkan/icd.d/MoltenVK_icd.json" \
-               "$APP/Contents/Resources/share/vulkan/icd.d/"
+          LOADER_PREFIX="$(brew --prefix vulkan-loader)"
+
+          # (1) The Vulkan loader. Zink dlopen()s "libvulkan.1.dylib" by
+          # name, so it MUST be bundled under that exact name — without it
+          # Zink dies with "ZINK: failed to load libvulkan.1.dylib". brew
+          # ships it as a symlink to a versioned file; cp -L copies the
+          # real target.
+          if [ -f "$LOADER_PREFIX/lib/libvulkan.1.dylib" ]; then
+            cp -L -f "$LOADER_PREFIX/lib/libvulkan.1.dylib" "$LIBDIR/libvulkan.1.dylib"
+            install_name_tool -id "$PREFIX/libvulkan.1.dylib" "$LIBDIR/libvulkan.1.dylib"
+            ln -sf libvulkan.1.dylib "$LIBDIR/libvulkan.dylib"
+            for dep in $(otool -L "$LIBDIR/libvulkan.1.dylib" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"
+                dep_base="$(basename "$dep")"
+                install_name_tool -change "$dep" "$PREFIX/$dep_base" "$LIBDIR/libvulkan.1.dylib"
+              fi
+            done
+          else
+            echo "::warning::Vulkan loader libvulkan.1.dylib not found; Zink hardware path will be unavailable"
           fi
+
+          # (2) The Vulkan-on-Metal drivers (ICDs). KosmicKrisp is the
+          # macOS-26 hardware path; MoltenVK is bundled as a secondary.
           if [ -f "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" ]; then
             process_dylib "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib"
           fi
           if [ -f "$MOLTEN_PREFIX/lib/libMoltenVK.dylib" ]; then
             process_dylib "$MOLTEN_PREFIX/lib/libMoltenVK.dylib"
+          fi
+
+          # (3) ICD manifests so the loader can find a driver. library_path
+          # is written RELATIVE to the manifest so it resolves wherever the
+          # user installs the .app: the manifest lives at
+          # Resources/share/vulkan/icd.d/, the dylibs at Resources/lib/, so
+          # the relative path is ../../../lib/<dylib>. The previous version
+          # copied a brew ICD path that does not exist, leaving icd.d empty.
+          ICD_DIR="$APP/Contents/Resources/share/vulkan/icd.d"
+          mkdir -p "$ICD_DIR"
+          if [ -f "$LIBDIR/libvulkan_kosmickrisp.dylib" ]; then
+            printf '%s\n' \
+              '{' \
+              '  "file_format_version": "1.0.0",' \
+              '  "ICD": {' \
+              '    "library_path": "../../../lib/libvulkan_kosmickrisp.dylib",' \
+              '    "api_version": "1.3.0"' \
+              '  }' \
+              '}' > "$ICD_DIR/kosmickrisp.json"
+          fi
+          if [ -f "$LIBDIR/libMoltenVK.dylib" ]; then
+            printf '%s\n' \
+              '{' \
+              '  "file_format_version": "1.0.0",' \
+              '  "ICD": {' \
+              '    "library_path": "../../../lib/libMoltenVK.dylib",' \
+              '    "api_version": "1.2.0"' \
+              '  }' \
+              '}' > "$ICD_DIR/MoltenVK.json"
           fi
 
           # Copy docs but exclude dotfiles (like .hugo_build.lock,
@@ -414,10 +469,32 @@ jobs:
           # there is no X11 display server. Without this, eglInitialize
           # tries to connect to xcb and fails with EGL_NOT_INITIALIZED.
           export EGL_PLATFORM=surfaceless
-          # Vulkan loader looks here for the KosmicKrisp / MoltenVK ICD.
-          export VK_DRIVER_FILES="\$RES/share/vulkan/icd.d/MoltenVK_icd.json"
-          export VK_ICD_FILENAMES="\$RES/share/vulkan/icd.d/MoltenVK_icd.json"
           export VULKAN_SDK="\$RES"
+          # ---- Rendering backend selection ----
+          # Default: Mesa llvmpipe software rendering. It is the only path
+          # that can be verified in CI (GitHub's hosted macOS runners have
+          # no GPU: KosmicKrisp reports "Failed to detect any valid GPUs")
+          # and it works on every macOS version.
+          #
+          # On a real macOS 26+ Apple Silicon machine the GPU is reachable
+          # through Mesa Zink -> KosmicKrisp -> Metal, which is far faster
+          # than llvmpipe. KosmicKrisp only exposes the Vulkan features
+          # Zink requires (VK_EXT_robustness2 nullDescriptor) on macOS 26,
+          # so gate on the OS major version. Set BAR_FORCE_LLVMPIPE=1 to
+          # force software rendering (e.g. inside a GPU-less VM).
+          OS_MAJOR="\$(sw_vers -productVersion | cut -d. -f1)"
+          KOSMIC_ICD="\$RES/share/vulkan/icd.d/kosmickrisp.json"
+          if [ "\${BAR_FORCE_LLVMPIPE:-0}" != "1" ] && [ "\$OS_MAJOR" -ge 26 ] && [ -f "\$KOSMIC_ICD" ] && [ -f "\$RES/lib/libvulkan.1.dylib" ]; then
+            export GALLIUM_DRIVER=zink
+            export MESA_LOADER_DRIVER_OVERRIDE=zink
+            export VK_ICD_FILENAMES="\$KOSMIC_ICD"
+            export VK_DRIVER_FILES="\$KOSMIC_ICD"
+            # Zink dlopen()s libvulkan.1.dylib by name. DYLD_FALLBACK is the
+            # SAFE search path: unlike DYLD_LIBRARY_PATH it does not shadow
+            # the system OpenGL framework, so it avoids the NSOpenGLContext
+            # SIGBUS that a full DYLD_LIBRARY_PATH caused.
+            export DYLD_FALLBACK_LIBRARY_PATH="\$RES/lib"
+          fi
           cd "\$RES"
           exec "\$RES/bin/spring" \\
             --isolation-dir "\$GAME_DIR" \\
