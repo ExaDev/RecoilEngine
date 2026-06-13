@@ -249,6 +249,12 @@ jobs:
 
           # Add @rpath so the engine finds libs relative to itself.
           install_name_tool -add_rpath "$PREFIX" "$ENGINE" 2>/dev/null || true
+          # Remove any stale Homebrew rpath entries from the build host.
+          # The engine may pick up /opt/homebrew/Cellar/... paths from the
+          # cmake link step; these must not leak into the bundle.
+          while IFS= read -r rp; do
+            install_name_tool -delete_rpath "$rp" "$ENGINE" 2>/dev/null || true
+          done < <(otool -l "$ENGINE" | awk '/LC_RPATH/{found=1} found && /path /{print $2; found=0}' | grep '/opt/homebrew')
 
           # Bundle Mesa's full lib stack (Zink + KosmicKrisp need it).
           MESA_PREFIX="$(brew --prefix mesa)"
@@ -303,7 +309,9 @@ jobs:
 
           # Package Beyond-All-Reason game content as .sdd directory.
           # Exclude dev-only files that bloat the bundle.
-          GAME_SDD="$GAME_DIR/games/Beyond All Reason $GAME_VERSION"
+          # The .sdd suffix is required for the engine's archive scanner
+          # to recognise the directory as a Spring Data Directory.
+          GAME_SDD="$GAME_DIR/games/Beyond All Reason $GAME_VERSION.sdd"
           rsync -a \
             --exclude='.git' \
             --exclude='.gitignore' \
@@ -318,7 +326,7 @@ jobs:
           rm -f "$GAME_SDD/modinfo.lua.bak"
 
           # Package BYAR-Chobby lobby as .sdd directory.
-          LOBBY_SDD="$GAME_DIR/games/BYAR Chobby $LOBBY_VERSION"
+          LOBBY_SDD="$GAME_DIR/games/BYAR Chobby $LOBBY_VERSION.sdd"
           rsync -a \
             --exclude='.git' \
             --exclude='.gitignore' \
@@ -334,6 +342,32 @@ jobs:
           echo "Game content staged:"
           echo "  Game: Beyond All Reason $GAME_VERSION"
           echo "  Lobby: BYAR Chobby $LOBBY_VERSION"
+
+          # ---- Bundle base content ----
+          # The engine requires base content archives that ship as part
+          # of the engine build: springcontent.sdz (fonts, base Lua),
+          # bitmaps.sdz (UI icons), maphelper.sdz (map Lua utilities),
+          # and cursors.sdz (cursor images). Without these, the engine
+          # cannot load any game or menu archive because springcontent
+          # declares a dependency on "Spring Bitmaps" which comes from
+          # bitmaps.sdz.
+          cp -f ../build/base/springcontent.sdz "$GAME_DIR/games/"
+          cp -f ../build/base/spring/bitmaps.sdz  "$GAME_DIR/games/"
+          cp -f ../build/base/maphelper.sdz       "$GAME_DIR/games/"
+          cp -f ../build/base/cursors.sdz         "$GAME_DIR/games/"
+          echo "  Base content: springcontent, bitmaps, maphelper, cursors"
+
+          # FreeSans font required by the engine's font loader.
+          # Downloaded from GNU FreeFont and placed in the game's
+          # fonts/ directory. The engine looks for
+          # fonts/FreeSansBold.otf relative to the writeable data dir.
+          FONT_DIR="$GAME_DIR/fonts"
+          mkdir -p "$FONT_DIR"
+          curl -sL "https://ftp.gnu.org/gnu/freefont/freefont-otf-20120503.tar.gz" | \
+            tar xz -C "$FONT_DIR" --strip-components=1 "freefont-otf-20120503/FreeSansBold.otf"
+          if [ ! -f "$FONT_DIR/FreeSansBold.otf" ]; then
+            echo "::warning::Failed to download FreeSansBold.otf, game may fail to start"
+          fi
 
           # Launcher: the engine runs in isolation mode with the game
           # data directory inside the bundle. User data (logs, configs,
@@ -358,6 +392,10 @@ jobs:
           # The engine needs to find its bundled Mesa + Vulkan libs.
           export DYLD_LIBRARY_PATH="\$RES/lib:\${DYLD_LIBRARY_PATH:-}"
           export DYLD_FRAMEWORK_PATH="\$RES/lib:\${DYLD_FRAMEWORK_PATH:-}"
+          # Mesa EGL on macOS must use the surfaceless platform because
+          # there is no X11 display server. Without this, eglInitialize
+          # tries to connect to xcb and fails with EGL_NOT_INITIALIZED.
+          export EGL_PLATFORM=surfaceless
           # Vulkan loader looks here for the KosmicKrisp / MoltenVK ICD.
           export VK_DRIVER_FILES="\$RES/share/vulkan/icd.d/MoltenVK_icd.json"
           export VK_ICD_FILENAMES="\$RES/share/vulkan/icd.d/MoltenVK_icd.json"
@@ -499,20 +537,31 @@ jobs:
           fi
           echo "All Mach-Os use @executable_path-relative paths"
 
+          echo "--- Engine rpath audit ---"
+          # The engine must not carry stale /opt/homebrew rpath entries
+          # from the build host. Only @executable_path/../lib is valid.
+          RPATH_COUNT=$(otool -l "$ENGINE" | awk '/LC_RPATH/{found=1} found && /path /{print $2; found=0}' | grep -c '/opt/homebrew' || true)
+          if [ "$RPATH_COUNT" -ne 0 ]; then
+            echo "::error::$RPATH_COUNT stale /opt/homebrew rpath entries in engine binary"
+            otool -l "$ENGINE" | awk '/LC_RPATH/{found=1} found && /path /{print $2; found=0}' | grep '/opt/homebrew'
+            exit 1
+          fi
+          echo "Engine rpath clean"
+
           echo "--- Game content verification ---"
           GAME_DIR="$APP/Contents/Resources/game"
           if [ ! -d "$GAME_DIR/games" ]; then
             echo "::error::$GAME_DIR/games does not exist"
             exit 1
           fi
-          SDD_COUNT=$(find "$GAME_DIR/games" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')
+          SDD_COUNT=$(find "$GAME_DIR/games" -mindepth 1 -maxdepth 1 -name '*.sdd' -type d | wc -l | tr -d ' ')
           echo "Found $SDD_COUNT .sdd directories"
           if [ "$SDD_COUNT" -lt 2 ]; then
             echo "::error::Expected at least 2 .sdd directories (game + lobby), found $SDD_COUNT"
             exit 1
           fi
           # Verify each .sdd has modinfo.lua and $VERSION was replaced.
-          for sdd in "$GAME_DIR/games"/*/; do
+          for sdd in "$GAME_DIR/games"/*.sdd/; do
             MODINFO="${sdd}modinfo.lua"
             if [ ! -f "$MODINFO" ]; then
               echo "::error::Missing modinfo.lua in $sdd"
@@ -526,6 +575,20 @@ jobs:
             VER=$(awk -F"'" '/version = /{print $2; exit}' "$MODINFO")
             echo "  .sdd OK: $NAME $VER"
           done
+          # Verify base content archives exist.
+          for base in springcontent.sdz bitmaps.sdz maphelper.sdz cursors.sdz; do
+            if [ ! -f "$GAME_DIR/games/$base" ]; then
+              echo "::error::Missing base content: $base"
+              exit 1
+            fi
+            echo "  Base OK: $base"
+          done
+          # Verify FreeSans font.
+          if [ ! -f "$GAME_DIR/fonts/FreeSansBold.otf" ]; then
+            echo "::warning::Missing fonts/FreeSansBold.otf"
+          else
+            echo "  Font OK: FreeSansBold.otf"
+          fi
 
           echo "--- Launcher script validation ---"
           if [ ! -x "$LAUNCHER" ]; then
