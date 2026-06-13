@@ -363,8 +363,7 @@ jobs:
           # fonts/FreeSansBold.otf relative to the writeable data dir.
           FONT_DIR="$GAME_DIR/fonts"
           mkdir -p "$FONT_DIR"
-          curl -sL "https://ftp.gnu.org/gnu/freefont/freefont-otf-20120503.tar.gz" > /tmp/freefont.tar.gz 
-            && tar xzf /tmp/freefont.tar.gz -C "$FONT_DIR" --strip-components=1 "freefont-20120503/FreeSansBold.otf" || true
+          curl -sL "https://ftp.gnu.org/gnu/freefont/freefont-otf-20120503.tar.gz" > /tmp/freefont.tar.gz && tar xzf /tmp/freefont.tar.gz -C "$FONT_DIR" --strip-components=1 "freefont-20120503/FreeSansBold.otf" || true
           if [ ! -f "$FONT_DIR/FreeSansBold.otf" ]; then
             echo "::warning::Failed to download FreeSansBold.otf, game may fail to start"
           fi
