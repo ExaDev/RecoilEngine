@@ -339,6 +339,24 @@ jobs:
           sed -i.bak "s/\\\$VERSION/$LOBBY_VERSION/g" "$LOBBY_SDD/modinfo.lua"
           rm -f "$LOBBY_SDD/modinfo.lua.bak"
 
+          # The BAR launcher normally reads dist_cfg/config.json and
+          # extracts the json_files.chobby_config.json entry, writing it
+          # to the game data directory before launching the engine.
+          # Since this bundle has no launcher, we generate the file
+          # directly inside the Chobby .sdd so the VFS can find it.
+          cat > "$LOBBY_SDD/chobby_config.json" <<CHOBBY_CFG
+{
+  "server": {
+    "address": "server4.beyondallreason.info",
+    "port": 8200,
+    "protocol": "spring",
+    "serverName": "BAR"
+  },
+  "game": "byar"
+}
+CHOBBY_CFG
+
+
           echo "Game content staged:"
           echo "  Game: Beyond All Reason $GAME_VERSION"
           echo "  Lobby: BYAR Chobby $LOBBY_VERSION"
