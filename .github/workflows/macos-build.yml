@@ -344,17 +344,16 @@ jobs:
           # to the game data directory before launching the engine.
           # Since this bundle has no launcher, we generate the file
           # directly inside the Chobby .sdd so the VFS can find it.
-          cat > "$LOBBY_SDD/chobby_config.json" <<CHOBBY_CFG
-{
-  "server": {
-    "address": "server4.beyondallreason.info",
-    "port": 8200,
-    "protocol": "spring",
-    "serverName": "BAR"
-  },
-  "game": "byar"
-}
-CHOBBY_CFG
+          printf '%s\n' \
+            '{' \
+            '  "server": {' \
+            '    "address": "server4.beyondallreason.info",' \
+            '    "port": 8200,' \
+            '    "protocol": "spring",' \
+            '    "serverName": "BAR"' \
+            '  },' \
+            '  "game": "byar"' \
+            '}' > "$LOBBY_SDD/chobby_config.json"
 
 
           echo "Game content staged:"
