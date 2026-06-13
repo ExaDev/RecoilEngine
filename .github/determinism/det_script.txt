@@ -1,0 +1,20 @@
+[GAME]
+{
+    GameType=__GAMETYPE__;
+    MapName=Red Comet;
+    StartPosType=0;
+    IsHost=1;
+    NumPlayers=1;
+    NumTeams=2;
+    NumAllyTeams=2;
+    NumRestrictions=0;
+    MyPlayerName=Player;
+    FixedRNGSeed=12345;
+
+    [PLAYER0] { Name=Player; IsFromDemo=0; Spectator=0; Team=0; }
+    [AI0]     { Name=SimpleAI0; ShortName=SimpleAI; Version=; Team=1; IsFromDemo=0; Host=0; }
+    [TEAM0]   { TeamLeader=0; AllyTeam=0; RGBColor=0.1 0.1 0.8; Side=Armada; StartPosX=500; StartPosZ=500; }
+    [TEAM1]   { TeamLeader=0; AllyTeam=1; RGBColor=0.8 0.1 0.1; Side=Cortex; StartPosX=3500; StartPosZ=3500; }
+    [ALLYTEAM0] { NumAllies=0; }
+    [ALLYTEAM1] { NumAllies=0; }
+}
