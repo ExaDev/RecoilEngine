@@ -1,0 +1,145 @@
+name: Zink macOS Probe
+
+# De-risking probe for the Apple Silicon hardware-rendering path.
+#
+# Before investing in the full engine build + bundle plumbing, this job
+# answers one question: on a GitHub-hosted macos-26 (Apple Silicon)
+# runner, does Mesa's Zink driver initialise an OpenGL context on top of
+# a Vulkan-on-Metal driver (KosmicKrisp or MoltenVK), or does it fall
+# back to llvmpipe / fail outright?
+#
+# It builds a ~90-line surfaceless EGL probe and runs it under several
+# driver configurations, printing GL_RENDERER for each. "zink (Apple
+# M..., Metal)" means hardware rendering works headlessly in CI; an
+# llvmpipe result or an EGL error tells us the runner has no usable
+# Metal device and CI hardware rendering is off the table.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - zink-probe
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Zink probe (macOS 26 arm64)
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Toolchain + OS
+        run: |
+          sw_vers
+          uname -a
+          sysctl -n machdep.cpu.brand_string
+
+      - name: Install Mesa + Vulkan
+        run: |
+          brew update
+          brew install mesa vulkan-loader molten-vk vulkan-headers
+
+      - name: Inventory drivers
+        run: |
+          MESA="$(brew --prefix mesa)"
+          LOADER="$(brew --prefix vulkan-loader)"
+          MOLTEN="$(brew --prefix molten-vk)"
+          echo "mesa:   $MESA"
+          echo "loader: $LOADER"
+          echo "molten: $MOLTEN"
+          echo "--- mesa version ---"
+          brew list --versions mesa
+          echo "--- vulkan / gallium dylibs ---"
+          ls -la "$MESA/lib/" | grep -iE 'vulkan|gallium|GL|EGL|kosmic' || true
+          ls -la "$LOADER/lib/" | grep -i vulkan || true
+          ls -la "$MOLTEN/lib/" | grep -i molten || true
+          echo "--- any prebuilt ICD manifests ---"
+          find "$MESA" "$MOLTEN" "$LOADER" -iname '*icd*.json' 2>/dev/null || true
+
+      - name: Write ICD manifests
+        run: |
+          MESA="$(brew --prefix mesa)"
+          MOLTEN="$(brew --prefix molten-vk)"
+          mkdir -p /tmp/icd
+          # KosmicKrisp (Mesa's Vulkan-on-Metal driver), if present.
+          if [ -f "$MESA/lib/libvulkan_kosmickrisp.dylib" ]; then
+            cat > /tmp/icd/kosmickrisp.json <<JSON
+          { "file_format_version": "1.0.0", "ICD": { "library_path": "$MESA/lib/libvulkan_kosmickrisp.dylib", "api_version": "1.3.0" } }
+          JSON
+            echo "wrote kosmickrisp ICD"
+          else
+            echo "::warning::libvulkan_kosmickrisp.dylib not found in mesa keg"
+          fi
+          # MoltenVK fallback.
+          if [ -f "$MOLTEN/lib/libMoltenVK.dylib" ]; then
+            cat > /tmp/icd/molten.json <<JSON
+          { "file_format_version": "1.0.0", "ICD": { "library_path": "$MOLTEN/lib/libMoltenVK.dylib", "api_version": "1.2.0" } }
+          JSON
+            echo "wrote molten ICD"
+          fi
+          # Lavapipe (software Vulkan) sanity reference.
+          if [ -f "$MESA/lib/libvulkan_lvp.dylib" ]; then
+            cat > /tmp/icd/lvp.json <<JSON
+          { "file_format_version": "1.0.0", "ICD": { "library_path": "$MESA/lib/libvulkan_lvp.dylib", "api_version": "1.3.0" } }
+          JSON
+            echo "wrote lavapipe ICD"
+          fi
+          ls -la /tmp/icd/
+
+      - name: Build probe
+        run: |
+          MESA="$(brew --prefix mesa)"
+          clang .github/zink-probe/egl_probe.c \
+            -I"$MESA/include" \
+            -L"$MESA/lib" -lEGL -lGL \
+            -Wl,-rpath,"$MESA/lib" \
+            -o /tmp/egl_probe
+          file /tmp/egl_probe
+
+      - name: Run probe under each driver config
+        run: |
+          MESA="$(brew --prefix mesa)"
+          LOADER="$(brew --prefix vulkan-loader)"
+          # Zink dlopens libvulkan.1.dylib by name; make the loader findable.
+          export DYLD_FALLBACK_LIBRARY_PATH="$LOADER/lib:$MESA/lib"
+          export EGL_PLATFORM=surfaceless
+          export VK_LOADER_DEBUG=error,warn
+
+          run_cfg() {
+            local name="$1"; shift
+            echo ""
+            echo "===================== $name ====================="
+            ( "$@" /tmp/egl_probe ) 2>&1 || echo "(exit $?)"
+          }
+
+          # Baseline: no driver override -> expect llvmpipe (software).
+          run_cfg "baseline (no GALLIUM_DRIVER)" env
+
+          # Zink over KosmicKrisp -> the target hardware path.
+          if [ -f /tmp/icd/kosmickrisp.json ]; then
+            run_cfg "zink + KosmicKrisp" env \
+              GALLIUM_DRIVER=zink MESA_LOADER_DRIVER_OVERRIDE=zink LIBGL_ALWAYS_SOFTWARE=0 \
+              VK_ICD_FILENAMES=/tmp/icd/kosmickrisp.json VK_DRIVER_FILES=/tmp/icd/kosmickrisp.json
+          fi
+
+          # Zink over MoltenVK -> fallback hardware path.
+          if [ -f /tmp/icd/molten.json ]; then
+            run_cfg "zink + MoltenVK" env \
+              GALLIUM_DRIVER=zink MESA_LOADER_DRIVER_OVERRIDE=zink LIBGL_ALWAYS_SOFTWARE=0 \
+              MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=1 \
+              VK_ICD_FILENAMES=/tmp/icd/molten.json VK_DRIVER_FILES=/tmp/icd/molten.json
+          fi
+
+          # Zink over lavapipe -> proves the Zink stack itself is wired
+          # correctly even if no hardware Vulkan device is exposed.
+          if [ -f /tmp/icd/lvp.json ]; then
+            run_cfg "zink + lavapipe (software vulkan)" env \
+              GALLIUM_DRIVER=zink MESA_LOADER_DRIVER_OVERRIDE=zink \
+              VK_ICD_FILENAMES=/tmp/icd/lvp.json VK_DRIVER_FILES=/tmp/icd/lvp.json
+          fi
+          echo ""
+          echo "Probe complete."
