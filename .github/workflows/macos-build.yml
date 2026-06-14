@@ -456,10 +456,12 @@ jobs:
           # which we set to the bundled game content. We symlink games/
           # into the user data area so the engine can also find any
           # additional maps or resources the user downloads.
-          GAMES_LINK="\$USER_DATA/games"
-          if [ ! -e "\$GAMES_LINK" ]; then
-            ln -s "\$GAME_DIR/games" "\$GAMES_LINK"
-          fi
+          # Read bundled content via symlinks; the engine WRITES (logs,
+          # config, demos, caches, downloads) into USER_DATA, never into
+          # the .app, so the bundle keeps its code-sign seal intact on
+          # macOS 26 (which SIGKILLs a Mach-O with an invalid seal).
+          [ -e "\$USER_DATA/games" ] || ln -s "\$GAME_DIR/games" "\$USER_DATA/games"
+          [ -e "\$USER_DATA/fonts" ] || ln -s "\$GAME_DIR/fonts" "\$USER_DATA/fonts"
           # Do NOT set DYLD_LIBRARY_PATH — it overrides the system OpenGL
           # framework globally, breaking NSOpenGLContext inside SDL2's
           # Cocoa backend (SIGBUS in +[NSOpenGLContext currentContext]).
@@ -495,9 +497,9 @@ jobs:
             # SIGBUS that a full DYLD_LIBRARY_PATH caused.
             export DYLD_FALLBACK_LIBRARY_PATH="\$RES/lib"
           fi
-          cd "\$RES"
+          cd "\$USER_DATA"
           exec "\$RES/bin/spring" \\
-            --isolation-dir "\$GAME_DIR" \\
+            --isolation-dir "\$USER_DATA" \\
             --menu "BYAR Chobby $LOBBY_VERSION" \\
             "\$@"
           LAUNCHER
