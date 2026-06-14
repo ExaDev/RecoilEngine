@@ -508,6 +508,16 @@ jobs:
             # SIGBUS that a full DYLD_LIBRARY_PATH caused.
             export DYLD_FALLBACK_LIBRARY_PATH="\$RES/lib"
           fi
+          # ---- Content download sources ----
+          # pr-downloader defaults to the legacy springrts.com servers
+          # (repos.springrts.com / springfiles.springrts.com), which only
+          # mirror older maps. Newer BAR maps (e.g. Shallow Straits, Death
+          # Valley) live solely on BAR's own CDN, so without these overrides
+          # the map search returns zero results and Chobby reports
+          # "Download Failed ... errorID 2". Point both rapid and the HTTP
+          # map search at BAR's content network.
+          export PRD_RAPID_REPO_MASTER="https://repos-cdn.beyondallreason.dev/repos.gz"
+          export PRD_HTTP_SEARCH_URL="https://files-cdn.beyondallreason.dev/find"
           cd "\$USER_DATA"
           exec "\$RES/bin/spring" \\
             --isolation-dir "\$USER_DATA" \\
