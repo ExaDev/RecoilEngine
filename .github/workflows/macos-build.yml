@@ -468,6 +468,11 @@ jobs:
           # deploy it there or the lobby is a black screen (game=generic ->
           # interface_root crashes on missing ShortenNameString -> Chobby nil).
           cp -f "\$GAME_DIR/chobby_config.json" "\$USER_DATA/chobby_config.json"
+          # First-run window defaults: a normal bordered, resizable window.
+          # The engine default is fullscreen, and borderless-windowed has no
+          # resize controls on macOS, so seed a windowed/bordered config if the
+          # user has none yet (their later changes via the lobby are preserved).
+          [ -f "\$USER_DATA/springsettings.cfg" ] || printf 'Fullscreen = 0\nWindowBorderless = 0\n' > "\$USER_DATA/springsettings.cfg"
           # Do NOT set DYLD_LIBRARY_PATH — it overrides the system OpenGL
           # framework globally, breaking NSOpenGLContext inside SDL2's
           # Cocoa backend (SIGBUS in +[NSOpenGLContext currentContext]).
