@@ -394,11 +394,13 @@ jobs:
           sed -i.bak "s/\\\$VERSION/$LOBBY_VERSION/g" "$LOBBY_SDD/modinfo.lua"
           rm -f "$LOBBY_SDD/modinfo.lua.bak"
 
-          # The BAR launcher normally reads dist_cfg/config.json and
-          # extracts the json_files.chobby_config.json entry, writing it
-          # to the game data directory before launching the engine.
-          # Since this bundle has no launcher, we generate the file
-          # directly inside the Chobby .sdd so the VFS can find it.
+          # The BAR launcher normally reads dist_cfg/config.json and extracts
+          # the json_files.chobby_config.json entry, writing it to the game
+          # data directory before launching the engine. We stage it at a stable
+          # bundle path here; our launcher copies it into the data dir at
+          # runtime, where liblobby reads it via raw VFS. (It must NOT go inside
+          # the .sdd — liblobby's raw-VFS lookup can't see it there, so the
+          # lobby would fall back to game=generic and render a black screen.)
           printf '%s\n' \
             '{' \
             '  "server": {' \
@@ -408,7 +410,7 @@ jobs:
             '    "serverName": "BAR"' \
             '  },' \
             '  "game": "byar"' \
-            '}' > "$LOBBY_SDD/chobby_config.json"
+            '}' > "$GAME_DIR/chobby_config.json"
 
 
           echo "Game content staged:"
@@ -462,6 +464,10 @@ jobs:
           # macOS 26 (which SIGKILLs a Mach-O with an invalid seal).
           [ -e "\$USER_DATA/games" ] || ln -s "\$GAME_DIR/games" "\$USER_DATA/games"
           [ -e "\$USER_DATA/fonts" ] || ln -s "\$GAME_DIR/fonts" "\$USER_DATA/fonts"
+          # liblobby reads chobby_config.json from the data dir via raw VFS;
+          # deploy it there or the lobby is a black screen (game=generic ->
+          # interface_root crashes on missing ShortenNameString -> Chobby nil).
+          cp -f "\$GAME_DIR/chobby_config.json" "\$USER_DATA/chobby_config.json"
           # Do NOT set DYLD_LIBRARY_PATH — it overrides the system OpenGL
           # framework globally, breaking NSOpenGLContext inside SDL2's
           # Cocoa backend (SIGBUS in +[NSOpenGLContext currentContext]).
