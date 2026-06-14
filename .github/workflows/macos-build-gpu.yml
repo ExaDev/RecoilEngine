@@ -27,16 +27,18 @@ name: Build macOS Engine (GPU / Mesa 26.2 KosmicKrisp)
 
 on:
   workflow_dispatch:
-  # bar-lobby consumes THIS build's artifact (the KosmicKrisp GPU engine), so it
-  # must run on macos-port pushes, not just manually. The heavy Mesa 26.2 + LLVM
-  # 19 toolchain is cached (key mesa262-kk-llvm19-*), so after the first run a
-  # push rebuilds only the engine, not the toolchain.
+  # bar-lobby consumes THIS build's KosmicKrisp GPU engine, published as a
+  # GitHub Release asset, so it runs on every push to main (the fork's
+  # canonical branch). The heavy Mesa 26.2 + LLVM 19 toolchain is cached
+  # (key mesa262-kk-llvm19-*), so after the first run a push rebuilds only
+  # the engine, not the toolchain.
   push:
     branches:
-      - macos-port
+      - main
 
+# contents: write is needed to publish the engine artifact as a Release.
 permissions:
-  contents: read
+  contents: write
 
 env:
   # Pinned Mesa main commit verified to render BAR on KosmicKrisp.
@@ -345,5 +347,23 @@ jobs:
           name: engine-macos-arm64
           path: ${{ env.ENGINE_TARBALL }}
           if-no-files-found: error
+
+      # Publish a versioned GitHub Release per push so bar-lobby can consume the
+      # engine as a public release asset (token-free) instead of a cross-repo
+      # artifact (which needs a PAT). Tag is monotonic (run number) + sha.
+      - name: Publish engine release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
+          TAG="engine-macos-arm64-${GITHUB_RUN_NUMBER}-g${SHORT_SHA}"
+          gh release create "$TAG" "$ENGINE_TARBALL" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "macOS arm64 engine — run ${GITHUB_RUN_NUMBER} (${SHORT_SHA})" \
+            --notes "Self-contained Apple Silicon engine (Mesa 26.2 KosmicKrisp GPU) for bar-lobby. Built from ${GITHUB_SHA} on ${GITHUB_REF_NAME}." \
+            --latest
           retention-days: 30
           compression-level: 0  # already gzip-compressed
