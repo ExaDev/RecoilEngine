@@ -518,6 +518,12 @@ jobs:
           # map search at BAR's content network.
           export PRD_RAPID_REPO_MASTER="https://repos-cdn.beyondallreason.dev/repos.gz"
           export PRD_HTTP_SEARCH_URL="https://files-cdn.beyondallreason.dev/find"
+          # BAR's rapid streamer (streamer.cgi) fails on macOS curl
+          # (LibreSSL/SecureTransport, HTTP/2) with "Failure when receiving
+          # data from the peer", so the game download aborts with errorID 2.
+          # Disable the streamer; pr-downloader then uses the plain per-file
+          # rapid path, which transfers fine.
+          export PRD_RAPID_USE_STREAMER=false
           cd "\$USER_DATA"
           exec "\$RES/bin/spring" \\
             --isolation-dir "\$USER_DATA" \\
