@@ -347,6 +347,8 @@ jobs:
           name: engine-macos-arm64
           path: ${{ env.ENGINE_TARBALL }}
           if-no-files-found: error
+          retention-days: 30
+          compression-level: 0  # already gzip-compressed
 
       # Publish a versioned GitHub Release per push so bar-lobby can consume the
       # engine as a public release asset (token-free) instead of a cross-repo
@@ -359,11 +361,14 @@ jobs:
           set -euo pipefail
           SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
           TAG="engine-macos-arm64-${GITHUB_RUN_NUMBER}-g${SHORT_SHA}"
-          gh release create "$TAG" "$ENGINE_TARBALL" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "macOS arm64 engine — run ${GITHUB_RUN_NUMBER} (${SHORT_SHA})" \
-            --notes "Self-contained Apple Silicon engine (Mesa 26.2 KosmicKrisp GPU) for bar-lobby. Built from ${GITHUB_SHA} on ${GITHUB_REF_NAME}." \
-            --latest
-          retention-days: 30
-          compression-level: 0  # already gzip-compressed
+          NOTES="Self-contained Apple Silicon engine (Mesa 26.2 KosmicKrisp GPU) for bar-lobby. Built from ${GITHUB_SHA} on ${GITHUB_REF_NAME}."
+          TITLE="macOS arm64 engine — run ${GITHUB_RUN_NUMBER} (${SHORT_SHA})"
+          # Idempotent: create the release, or (on a re-run with the same tag)
+          # update its asset instead of failing.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ENGINE_TARBALL" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$ENGINE_TARBALL" \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "$TITLE" --notes "$NOTES" --latest
+          fi
