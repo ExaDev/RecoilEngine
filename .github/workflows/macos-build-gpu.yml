@@ -50,6 +50,8 @@ jobs:
   build-macos-gpu:
     name: Build macOS arm64 engine (GPU)
     runs-on: macos-26
+    outputs:
+      engine_tag: ${{ steps.publish.outputs.tag }}
 
     steps:
       - name: Checkout engine
@@ -354,6 +356,7 @@ jobs:
       # engine as a public release asset (token-free) instead of a cross-repo
       # artifact (which needs a PAT). Tag is monotonic (run number) + sha.
       - name: Publish engine release
+        id: publish
         if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -361,6 +364,7 @@ jobs:
           set -euo pipefail
           SHORT_SHA="$(echo "$GITHUB_SHA" | cut -c1-7)"
           TAG="engine-macos-arm64-${GITHUB_RUN_NUMBER}-g${SHORT_SHA}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           NOTES="Self-contained Apple Silicon engine (Mesa 26.2 KosmicKrisp GPU) for bar-lobby. Built from ${GITHUB_SHA} on ${GITHUB_REF_NAME}."
           TITLE="macOS arm64 engine — run ${GITHUB_RUN_NUMBER} (${SHORT_SHA})"
           # Idempotent: create the release, or (on a re-run with the same tag)
@@ -372,3 +376,35 @@ jobs:
               --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
               --title "$TITLE" --notes "$NOTES" --latest
           fi
+
+  # Propagate the engine to the lobby. A deploy key is git/SSH-only (it cannot
+  # call the API for repository_dispatch), so instead we push the new engine tag
+  # into a tracked file in ExaDev/bar-lobby. bar-lobby's release.yml triggers on
+  # push to macos-port and reads that file, so this both pins the lobby to an
+  # explicit engine version (reproducible — no "latest" race) and kicks a lobby
+  # rebuild. A deploy-key push (unlike a GITHUB_TOKEN push) does spawn the
+  # downstream workflow run.
+  bump-lobby:
+    name: Pin engine in bar-lobby
+    needs: build-macos-gpu
+    if: github.event_name == 'push' && needs.build-macos-gpu.outputs.engine_tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bar-lobby via SSH deploy key
+        uses: actions/checkout@v6
+        with:
+          repository: ExaDev/bar-lobby
+          ref: macos-port
+          ssh-key: ${{ secrets.LOBBY_DEPLOY_KEY }}
+      - name: Write pinned engine tag and push
+        env:
+          ENGINE_TAG: ${{ needs.build-macos-gpu.outputs.engine_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p buildResources
+          printf '%s\n' "$ENGINE_TAG" > buildResources/engine-release.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add buildResources/engine-release.txt
+          git diff --cached --quiet || git commit -m "chore: pin engine ${ENGINE_TAG}"
+          git push
