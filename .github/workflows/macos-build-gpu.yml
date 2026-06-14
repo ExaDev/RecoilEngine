@@ -1,0 +1,409 @@
+name: Build macOS Engine (GPU / Mesa 26.2 KosmicKrisp)
+
+# macOS 26 (Apple Silicon) build that renders on the GPU via
+# Mesa 26.2 Zink -> KosmicKrisp -> Metal, instead of the llvmpipe
+# software path used by macos-build.yml.
+#
+# Verified end-to-end on an M2 Max / macOS 26.1: the engine reports
+#   GL renderer : zink Vulkan 1.3 (Apple M2 Max (MESA_KOSMICKRISP))
+#   GL version  : 4.6 (Compatibility Profile) Mesa 26.2.0-devel
+#
+# GPU rendering needs Mesa 26.2's KosmicKrisp (it exposes the
+# VK_EXT_robustness2 nullDescriptor that Zink requires; 26.1.2 does not).
+# brew only ships 26.1.2, and brew's LLVM 22 cannot link Mesa's mandatory
+# KosmicKrisp CLC step (its static clang libs are incomplete and the
+# per-target CGBuiltin split landed in LLVM 20). So this job builds a
+# matched LLVM-19 toolchain from source: llvm@19 + SPIRV-LLVM-Translator
+# v19.1.7 + Mesa main (26.2-devel, pinned). The result is cached.
+#
+# KosmicKrisp requires Metal 4 (macOS 26+); there is no pre-26 GPU path,
+# so that case keeps the llvmpipe build from macos-build.yml.
+
+on:
+  # Manual only: the from-source Mesa 26.2 + LLVM 19 toolchain build is heavy,
+  # so it is not run on every push to the consolidated branch. Trigger it when
+  # a GPU DMG is wanted. The compat build (macos-build.yml) runs on push.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Pinned Mesa main commit verified to render BAR on KosmicKrisp.
+  MESA_COMMIT: "8f272b1fe1"
+  SPIRV_XLAT_TAG: "v19.1.7"
+  APP_NAME: "Beyond All Reason"
+  APP_BUNDLE: "Beyond All Reason.app"
+  DMG_NAME: "Beyond-All-Reason-macos-arm64-gpu.dmg"
+  BUILD_TYPE: RELWITHDEBINFO
+
+jobs:
+  build-macos-gpu:
+    name: Build macOS arm64 engine (GPU)
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout engine
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          path: src
+
+      - name: Checkout game content (Beyond-All-Reason)
+        uses: actions/checkout@v6
+        with:
+          repository: ExaDev/Beyond-All-Reason
+          ref: macos-port
+          path: game-data
+
+      - name: Checkout lobby (BYAR-Chobby)
+        uses: actions/checkout@v6
+        with:
+          repository: ExaDev/BYAR-Chobby
+          ref: macos-port
+          path: lobby
+
+      - name: Toolchain + OS
+        run: |
+          sw_vers
+          uname -a
+          clang++ --version | head -1
+
+      - name: Install Homebrew dependencies
+        run: |
+          brew update
+          brew install \
+            sdl2 libpng libjpeg-turbo libogg libvorbis freetype glm libomp \
+            vulkan-headers vulkan-loader molten-vk devil ninja ccache \
+            meson pkg-config bison flex llvm@19 libclc glslang spirv-tools
+
+      - name: Cache from-source Mesa 26.2 toolchain
+        id: cache-mesa
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/mesa-native
+            ~/spirv-xlat-install
+          key: mesa262-kk-llvm19-${{ env.MESA_COMMIT }}-${{ env.SPIRV_XLAT_TAG }}-v1
+
+      - name: Build matched LLVM-19 toolchain + Mesa 26.2 (KosmicKrisp)
+        if: steps.cache-mesa.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          L19="$(brew --prefix llvm@19)"
+
+          # (1) SPIRV-LLVM-Translator matched to LLVM 19 (brew ships v22).
+          if [ ! -f "$HOME/spirv-xlat-install/lib/pkgconfig/LLVMSPIRVLib.pc" ]; then
+            rm -rf "$HOME/spirv-xlat"
+            git clone --depth 1 --branch "$SPIRV_XLAT_TAG" \
+              https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git "$HOME/spirv-xlat"
+            cmake -S "$HOME/spirv-xlat" -B "$HOME/spirv-xlat/build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$HOME/spirv-xlat-install" \
+              -DLLVM_DIR="$L19/lib/cmake/llvm" \
+              -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+              -DCMAKE_EXE_LINKER_FLAGS="-Wl,-lto_library,$L19/lib/libLTO.dylib -L/opt/homebrew/lib" \
+              -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-lto_library,$L19/lib/libLTO.dylib -L/opt/homebrew/lib"
+            ninja -C "$HOME/spirv-xlat/build" install
+          fi
+
+          # (2) Mesa 26.2-devel with the KosmicKrisp Vulkan driver. Shallow
+          # clone of main (gitlab.freedesktop.org will not serve an arbitrary
+          # SHA via fetch); main is 26.2-devel and carries KosmicKrisp's
+          # native nullDescriptor support. Bump MESA_COMMIT to bust the cache.
+          rm -rf "$HOME/mesa-src"
+          git clone --depth 1 https://gitlab.freedesktop.org/mesa/mesa.git "$HOME/mesa-src"
+          echo "mesa commit: $(git -C "$HOME/mesa-src" rev-parse HEAD)  version: $(cat "$HOME/mesa-src/VERSION")"
+
+          python3 -m venv "$HOME/mesa-venv"
+          "$HOME/mesa-venv/bin/pip" install --quiet mako pyyaml packaging
+
+          # Force plain Apple clang (avoids any compiler-launcher wrapper) and
+          # point the linker at LLVM 19's libLTO (Apple ld's libLTO cannot
+          # parse newer bitcode). -L/opt/homebrew/lib resolves bare -lzstd etc.
+          cat > /tmp/plain-native.ini <<INI
+          [binaries]
+          c = '/usr/bin/clang'
+          cpp = '/usr/bin/clang++'
+          objc = '/usr/bin/clang'
+          objcpp = '/usr/bin/clang++'
+
+          [built-in options]
+          c_link_args = ['-Wl,-lto_library,$L19/lib/libLTO.dylib','-L/opt/homebrew/lib']
+          cpp_link_args = ['-Wl,-lto_library,$L19/lib/libLTO.dylib','-L/opt/homebrew/lib']
+          objc_link_args = ['-Wl,-lto_library,$L19/lib/libLTO.dylib','-L/opt/homebrew/lib']
+          objcpp_link_args = ['-Wl,-lto_library,$L19/lib/libLTO.dylib','-L/opt/homebrew/lib']
+          INI
+
+          cd "$HOME/mesa-src"
+          source "$HOME/mesa-venv/bin/activate"
+          export PATH="$L19/bin:$HOME/mesa-venv/bin:/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:$PATH"
+          export LIBRARY_PATH="/opt/homebrew/lib"
+          meson setup build-native --native-file /tmp/plain-native.ini \
+            --pkg-config-path "$HOME/spirv-xlat-install/lib/pkgconfig" \
+            -Dprefix="$HOME/mesa-native" -Dplatforms=macos \
+            -Degl-native-platform=surfaceless -Degl=enabled -Dglx=disabled \
+            -Dgallium-drivers=zink -Dvulkan-drivers=kosmickrisp \
+            -Dmoltenvk-dir=/opt/homebrew/opt/molten-vk \
+            -Dllvm=enabled -Dshared-llvm=disabled -Dbuildtype=release
+          ninja -C build-native install
+          test -f "$HOME/mesa-native/lib/libEGL.dylib"
+          test -f "$HOME/mesa-native/lib/libvulkan_kosmickrisp.dylib"
+          echo "Mesa 26.2 + KosmicKrisp built:"
+          ls "$HOME/mesa-native/lib"/*.dylib
+
+      - name: Configure engine (cmake, Mesa 26.2 libEGL)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          MESA_LIBEGL="$HOME/mesa-native/lib/libEGL.dylib"
+          test -f "$MESA_LIBEGL"
+          # EGL/GL headers come from the from-source Mesa 26.2 (no brew mesa).
+          export CPATH="$HOME/mesa-native/include${CPATH:+:$CPATH}"
+          mkdir -p ../build
+          cmake --fresh -S . -B ../build -G Ninja \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DAI_TYPES=NONE -DUSERDOCS_PLAIN=ON \
+            -DSPRING_MAC_LIBEGL="$MESA_LIBEGL"
+
+      - name: Build engine (ninja)
+        run: |
+          export CPATH="$HOME/mesa-native/include${CPATH:+:$CPATH}"
+          cd build
+          ninja -j$(sysctl -n hw.ncpu) spring
+          file ./spring
+
+      - name: Stage .app bundle
+        working-directory: build
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/$APP_BUNDLE"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" \
+                   "$APP/Contents/Resources/lib" "$APP/Contents/Resources/share" \
+                   "$APP/Contents/Resources/share/vulkan/icd.d"
+          LIBDIR="$APP/Contents/Resources/lib"
+          PREFIX="@executable_path/../lib"
+          cp -f ./spring "$APP/Contents/Resources/bin/spring"
+          if [ -d ./lib ]; then cp -R ./lib/. "$LIBDIR/"; fi
+          ENGINE="$APP/Contents/Resources/bin/spring"
+
+          process_dylib() {
+            local src="$1" base dest dep dep_base
+            base="$(basename "$src")"; dest="$LIBDIR/$base"
+            [ -f "$dest" ] && return
+            cp -f "$src" "$dest"; chmod u+w "$dest"
+            install_name_tool -id "$PREFIX/$base" "$dest" 2>/dev/null || true
+            for dep in $(otool -L "$dest" | grep -oE '(/opt/homebrew/[^ ]+|'"$HOME"'/mesa-native/lib/[^ ]+)\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"
+                dep_base="$(basename "$dep")"
+                install_name_tool -change "$dep" "$PREFIX/$dep_base" "$dest" 2>/dev/null || true
+              fi
+            done
+          }
+
+          # Engine's own deps (Homebrew + the from-source Mesa libEGL it was
+          # linked against) -> bundle and rewrite to @executable_path-relative.
+          for dep in $(otool -L "$ENGINE" | grep -oE '(/opt/homebrew/[^ ]+|'"$HOME"'/mesa-native/lib/[^ ]+)\.dylib' | sort -u); do
+            if [ -f "$dep" ]; then process_dylib "$dep"; install_name_tool -change "$dep" "$PREFIX/$(basename "$dep")" "$ENGINE"; fi
+          done
+          install_name_tool -add_rpath "$PREFIX" "$ENGINE" 2>/dev/null || true
+
+          # Mesa 26.2 (KosmicKrisp) lib stack from the from-source build.
+          for dy in "$HOME/mesa-native/lib/"*.dylib; do
+            [ -L "$dy" ] && continue
+            process_dylib "$dy"
+          done
+          ln -sf libEGL.1.dylib "$LIBDIR/libEGL.dylib" 2>/dev/null || true
+
+          # Vulkan loader (Zink dlopens libvulkan.1.dylib by name).
+          LOADER="$(brew --prefix vulkan-loader)/lib/libvulkan.1.dylib"
+          if [ -f "$LOADER" ]; then
+            cp -L -f "$LOADER" "$LIBDIR/libvulkan.1.dylib"; chmod u+w "$LIBDIR/libvulkan.1.dylib"
+            install_name_tool -id "$PREFIX/libvulkan.1.dylib" "$LIBDIR/libvulkan.1.dylib"
+            for dep in $(otool -L "$LIBDIR/libvulkan.1.dylib" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+              [ -f "$dep" ] && { process_dylib "$dep"; install_name_tool -change "$dep" "$PREFIX/$(basename "$dep")" "$LIBDIR/libvulkan.1.dylib"; }
+            done
+          fi
+
+          # KosmicKrisp ICD (library_path relative to the manifest).
+          printf '%s\n' '{' '  "file_format_version": "1.0.1",' '  "ICD": {' \
+            '    "library_path": "../../../lib/libvulkan_kosmickrisp.dylib",' \
+            '    "api_version": "1.3.353"' '  }' '}' \
+            > "$APP/Contents/Resources/share/vulkan/icd.d/kosmickrisp.json"
+
+          # Verify no absolute paths leak into the engine binary.
+          if otool -L "$ENGINE" | grep -qE '/opt/homebrew/|/mesa-native/'; then
+            echo "::error::unrewritten absolute dylib paths in engine"; otool -L "$ENGINE" | grep -E '/opt/homebrew/|/mesa-native/'; exit 1
+          fi
+
+          # ---- Game content (same layout as macos-build.yml) ----
+          GAME_DIR="$APP/Contents/Resources/game"; mkdir -p "$GAME_DIR/games"
+          GAME_VERSION="macos-$(cd ../game-data && git rev-parse --short HEAD)"
+          LOBBY_VERSION="macos-$(cd ../lobby && git rev-parse --short HEAD)"
+          GAME_SDD="$GAME_DIR/games/Beyond All Reason $GAME_VERSION.sdd"
+          rsync -a --exclude='.git' --exclude='.gitignore' --exclude='*.md' \
+            --exclude='spec/' --exclude='tools/' --exclude='lux.*' --exclude='singleplayer/' \
+            ../game-data/ "$GAME_SDD/"
+          sed -i.bak "s/\\\$VERSION/$GAME_VERSION/g" "$GAME_SDD/modinfo.lua"; rm -f "$GAME_SDD/modinfo.lua.bak"
+          LOBBY_SDD="$GAME_DIR/games/BYAR Chobby $LOBBY_VERSION.sdd"
+          rsync -a --exclude='.git' --exclude='.gitignore' --exclude='*.md' \
+            --exclude='autotest.sh' --exclude='workflows/' --exclude='dist_cfg/' \
+            ../lobby/ "$LOBBY_SDD/"
+          sed -i.bak "s/\\\$VERSION/$LOBBY_VERSION/g" "$LOBBY_SDD/modinfo.lua"; rm -f "$LOBBY_SDD/modinfo.lua.bak"
+          # chobby_config.json must live in the writeable data dir, NOT inside
+          # the .sdd: liblobby reads it via raw VFS (the filesystem), where the
+          # desktop launcher normally writes it. In the .sdd it's invisible to
+          # that lookup, liblobby falls back to game="generic", interface_root
+          # crashes on the missing ShortenNameString, Chobby never initialises,
+          # and the lobby is a black screen. Stage it at a stable bundle path;
+          # the launcher copies it into the data dir at runtime.
+          printf '%s\n' '{' '  "server": {' '    "address": "server4.beyondallreason.info",' \
+            '    "port": 8200,' '    "protocol": "spring",' '    "serverName": "BAR"' '  },' \
+            '  "game": "byar"' '}' > "$GAME_DIR/chobby_config.json"
+          cp -f ../build/base/springcontent.sdz "$GAME_DIR/games/" 2>/dev/null || cp -f ../build/base/spring/springcontent.sdz "$GAME_DIR/games/" 2>/dev/null || true
+          cp -f ../build/base/spring/bitmaps.sdz "$GAME_DIR/games/" 2>/dev/null || true
+          cp -f ../build/base/maphelper.sdz "$GAME_DIR/games/" 2>/dev/null || true
+          cp -f ../build/base/cursors.sdz "$GAME_DIR/games/" 2>/dev/null || true
+          FONT_DIR="$GAME_DIR/fonts"; mkdir -p "$FONT_DIR"
+          curl -sL "https://ftp.gnu.org/gnu/freefont/freefont-otf-20120503.tar.gz" > /tmp/ff.tar.gz && tar xzf /tmp/ff.tar.gz -C "$FONT_DIR" --strip-components=1 "freefont-20120503/FreeSansBold.otf" || true
+
+          # Launcher: this is the macOS-26 GPU build, so always select Zink.
+          cat > "$APP/Contents/MacOS/$APP_NAME" <<LAUNCHER
+          #!/bin/bash
+          set -e
+          APP_DIR="\$(cd "\$(dirname "\$0")/.." && pwd)"
+          RES="\$APP_DIR/Resources"
+          GAME_DIR="\$RES/game"
+          USER_DATA="\$HOME/Library/Application Support/$APP_NAME"
+          mkdir -p "\$USER_DATA"
+          # Read bundled content via symlinks; the engine WRITES (logs, config,
+          # demos, caches, downloads) into USER_DATA, never into the .app, so
+          # the bundle keeps its code-sign seal intact on macOS 26.
+          [ -e "\$USER_DATA/games" ] || ln -s "\$GAME_DIR/games" "\$USER_DATA/games"
+          [ -e "\$USER_DATA/fonts" ] || ln -s "\$GAME_DIR/fonts" "\$USER_DATA/fonts"
+          # Deploy chobby_config.json into the data dir so liblobby (raw VFS)
+          # finds it; without it the lobby is a black screen (see staging step).
+          cp -f "\$GAME_DIR/chobby_config.json" "\$USER_DATA/chobby_config.json"
+          # First-run window defaults: a normal bordered, resizable window
+          # (engine default is fullscreen; borderless-windowed has no resize
+          # controls on macOS). Only seed if the user has no config yet.
+          [ -f "\$USER_DATA/springsettings.cfg" ] || printf 'Fullscreen = 0\nWindowBorderless = 0\n' > "\$USER_DATA/springsettings.cfg"
+          export EGL_PLATFORM=surfaceless
+          export GALLIUM_DRIVER=zink
+          export MESA_LOADER_DRIVER_OVERRIDE=zink
+          export MESA_GL_VERSION_OVERRIDE=4.6
+          export VK_ICD_FILENAMES="\$RES/share/vulkan/icd.d/kosmickrisp.json"
+          export VK_DRIVER_FILES="\$RES/share/vulkan/icd.d/kosmickrisp.json"
+          # DYLD_FALLBACK is safe (does not shadow system OpenGL); Zink finds
+          # the bundled Vulkan loader through it.
+          export DYLD_FALLBACK_LIBRARY_PATH="\$RES/lib"
+          # pr-downloader defaults to the legacy springrts.com servers, which
+          # only mirror older maps. Newer BAR maps (e.g. Shallow Straits,
+          # Death Valley) live solely on BAR's CDN, so without these overrides
+          # the map search returns zero results ("Download Failed ... errorID
+          # 2"). Point rapid and the HTTP map search at BAR's content network.
+          export PRD_RAPID_REPO_MASTER="https://repos-cdn.beyondallreason.dev/repos.gz"
+          export PRD_HTTP_SEARCH_URL="https://files-cdn.beyondallreason.dev/find"
+          # BAR's rapid streamer (streamer.cgi) fails on macOS curl
+          # (LibreSSL/SecureTransport, HTTP/2) with CURLE_RECV_ERROR, aborting
+          # the game download with errorID 2. Disable it so pr-downloader uses
+          # the plain per-file rapid path, which transfers fine.
+          export PRD_RAPID_USE_STREAMER=false
+          cd "\$USER_DATA"
+          exec "\$RES/bin/spring" --isolation-dir "\$USER_DATA" --menu "BYAR Chobby $LOBBY_VERSION" "\$@"
+          LAUNCHER
+          chmod +x "$APP/Contents/MacOS/$APP_NAME"
+
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>$APP_NAME</string>
+            <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+            <key>CFBundleIdentifier</key><string>org.exadev.beyondallreason.gpu</string>
+            <key>CFBundleVersion</key><string>1.0.0</string>
+            <key>CFBundleShortVersionString</key><string>1.0.0</string>
+            <key>CFBundleExecutable</key><string>$APP_NAME</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSApplicationCategoryType</key><string>public.app-category.games</string>
+            <key>LSMinimumSystemVersion</key><string>26.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          PLIST
+
+          # Sign with a self-signed code-signing identity in a dedicated
+          # keychain (not ad-hoc). macOS 26 SIGKILLs Mach-Os whose signature
+          # seal is invalid, so every bundled dylib + the engine + launcher
+          # must carry a recognised signature for a drag-installed app to run.
+          CERT_NAME="ExaDev Local Build"
+          KEYCHAIN="$RUNNER_TEMP/macos-build.keychain"
+          KEYCHAIN_PW="$(openssl rand -hex 16)"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          cat > /tmp/codesign-ext.cnf <<CNF
+          [req]
+          distinguished_name = req_dn
+          x509_extensions = v3_ext
+          [req_dn]
+          [v3_ext]
+          basicConstraints = critical, CA:FALSE
+          keyUsage = critical, digitalSignature
+          extendedKeyUsage = critical, codeSigning
+          subjectKeyIdentifier = hash
+          CNF
+          # Use brew openssl@3 with -legacy so the PKCS12 MAC/ciphers are ones
+          # macOS 26's `security` accepts (its default SHA-256 MAC fails import
+          # with "MAC verification failed" on macOS 26).
+          OPENSSL="$(brew --prefix openssl@3 2>/dev/null)/bin/openssl"; [ -x "$OPENSSL" ] || OPENSSL=openssl
+          "$OPENSSL" req -x509 -newkey rsa:2048 -keyout /tmp/cert-key.pem -out /tmp/cert.pem \
+            -days 365 -nodes -config /tmp/codesign-ext.cnf -subj "/CN=$CERT_NAME/O=ExaDev"
+          "$OPENSSL" pkcs12 -export -legacy -macalg sha1 \
+            -out /tmp/cert.p12 -inkey /tmp/cert-key.pem -in /tmp/cert.pem -password pass:"$KEYCHAIN_PW"
+          security import /tmp/cert.p12 -k "$KEYCHAIN" -P "$KEYCHAIN_PW" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -k "$KEYCHAIN_PW" "$KEYCHAIN"
+          sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain /tmp/cert.pem
+          security list-keychains -s "$KEYCHAIN" "$(security list-keychains | tr -d '"')"
+          security find-identity -v "$KEYCHAIN"
+          codesign --force --keychain "$KEYCHAIN" --sign "$CERT_NAME" "$APP/Contents/Resources/lib/"*.dylib
+          codesign --force --keychain "$KEYCHAIN" --sign "$CERT_NAME" \
+            "$APP/Contents/Resources/bin/spring" "$APP/Contents/MacOS/$APP_NAME"
+          codesign --force --deep --keychain "$KEYCHAIN" --sign "$CERT_NAME" "$APP"
+          codesign --verify --deep --strict "$APP" && echo "signature OK"
+          echo "Bundle staged: $APP"
+
+      - name: Smoke test bundle structure
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/$APP_BUNDLE"
+          test -f "$APP/Contents/Resources/lib/libEGL.dylib"
+          test -f "$APP/Contents/Resources/lib/libvulkan_kosmickrisp.dylib"
+          test -f "$APP/Contents/Resources/lib/libvulkan.1.dylib"
+          test -f "$APP/Contents/Resources/share/vulkan/icd.d/kosmickrisp.json"
+          test -x "$APP/Contents/MacOS/$APP_NAME"
+          SDD=$(find "$APP/Contents/Resources/game/games" -maxdepth 1 -name '*.sdd' -type d | wc -l | tr -d ' ')
+          [ "$SDD" -ge 2 ] || { echo "::error::expected >=2 .sdd"; exit 1; }
+          echo "GPU bundle OK ($SDD game data dirs)"
+
+      - name: Create DMG
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/$APP_BUNDLE"
+          STAGE="$RUNNER_TEMP/dmg"; rm -rf "$STAGE"; mkdir -p "$STAGE"
+          cp -R "$APP" "$STAGE/"; ln -s /Applications "$STAGE/Applications"
+          hdiutil create -ov -volname "$APP_NAME" -fs HFS+ -srcfolder "$STAGE" \
+            -format UDZO -imagekey zlib-level=9 "$RUNNER_TEMP/$DMG_NAME"
+          ls -lah "$RUNNER_TEMP/$DMG_NAME"
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v7
+        with:
+          name: beyond-all-reason-macos-arm64-gpu
+          path: ${{ runner.temp }}/${{ env.DMG_NAME }}
+          if-no-files-found: error
+          retention-days: 14
