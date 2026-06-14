@@ -1,0 +1,334 @@
+name: Build macOS Engine
+
+# Builds the Beyond All Reason engine binaries on Apple Silicon (macos-15)
+# against Homebrew's Mesa, then packs them as the engine artifact bar-lobby
+# consumes. This is the push-triggered build; rendering goes through Mesa's
+# llvmpipe software path (the hosted runners have no GPU). The GPU build that
+# renders via Mesa 26.2 Zink -> KosmicKrisp -> Metal lives in
+# macos-build-gpu.yml (workflow_dispatch only).
+#
+# The engine code in this fork is the Recoil Engine with two upstream PRs
+# integrated onto a macos-port branch:
+#
+#   - beyond-all-reason/RecoilEngine#2820  Add macOS ARM64 platform support
+#   - beyond-all-reason/RecoilEngine#2991  macOS Apple Silicon support via
+#                                          Mesa Zink -> KosmicKrisp -> Metal
+#
+# This job emits a flat engine tree (bin/ lib/ share/ game/) packed as
+# engine-macos-arm64-<sha>.tar.gz. It does NOT ship a .app or DMG, and it
+# does NOT bundle downloadable game content (BAR / Chobby): bar-lobby fetches
+# that at runtime via pr-downloader. Only engine-built base content + the
+# engine binaries ship.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches:
+      # macos-port is built by macos-build-gpu.yml (the KosmicKrisp artifact
+      # bar-lobby consumes); this compat/llvmpipe build stays on master only to
+      # avoid double-building macOS on every macos-port push.
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Build macOS arm64 engine
+    runs-on: macos-15
+
+    env:
+      BUILD_TYPE: RELWITHDEBINFO
+      CMAKE_GENERATOR: Ninja
+
+    steps:
+      - name: Checkout engine
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          path: src
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          uname -a
+          sysctl -n machdep.cpu.brand_string
+          clang++ --version
+          cmake --version
+          ninja --version
+
+      - name: Cache Homebrew packages
+        id: cache-brew
+        uses: actions/cache@v5
+        with:
+          path: |
+            /opt/homebrew/Cellar
+            /opt/homebrew/opt
+            /opt/homebrew/lib
+            /opt/homebrew/include
+          key: brew-macos-arm64-v1
+          restore-keys: |
+            brew-macos-arm64-
+
+      - name: Install Homebrew dependencies
+        if: steps.cache-brew.outputs.cache-hit != 'true'
+        run: |
+          brew update
+          # p7zip provides the 7z used by the cmake `basecontent` target; cmake
+          # `find_package(SevenZip REQUIRED)` fails to configure without it.
+          brew install \
+            sdl2 \
+            libpng \
+            libjpeg-turbo \
+            libogg \
+            libvorbis \
+            freetype \
+            glm \
+            libomp \
+            vulkan-headers \
+            vulkan-loader \
+            molten-vk \
+            mesa \
+            devil \
+            ninja \
+            ccache \
+            p7zip
+
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          key: ccache-macos-arm64-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-arm64-${{ runner.os }}-
+
+      - name: Cache build directory
+        id: cache-build
+        uses: actions/cache@v5
+        with:
+          path: build
+          key: build-macos-arm64-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            build-macos-arm64-${{ runner.os }}-
+
+      - name: Configure engine (cmake)
+        working-directory: src
+        # SPRING_MAC_LIBEGL points at Homebrew's Mesa libEGL.dylib. The engine
+        # cmake looks for libGL.dylib next to it and links it explicitly; the
+        # matching libGL is what gives the engine the OpenGL 4.6 compatibility-
+        # profile context that Apple Silicon's native OpenGL 4.1 cannot.
+        run: |
+          MESA_LIBEGL="$(brew --prefix mesa)/lib/libEGL.dylib"
+          test -f "$MESA_LIBEGL" || (echo "Mesa libEGL.dylib not found at $MESA_LIBEGL" && exit 1)
+          mkdir -p ../build
+          # --fresh forces a full reconfigure; skip if the build cache hit.
+          FRESH_FLAG="--fresh"
+          if [ "${{ steps.cache-build.outputs.cache-hit }}" = "true" ]; then
+            FRESH_FLAG=""
+          fi
+          cmake $FRESH_FLAG -S . -B ../build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DAI_EXCLUDE_REGEX="^CppTestAI$" \
+            -DAI_TYPES=NONE \
+            -DUSERDOCS_PLAIN=ON \
+            -DSPRING_MAC_LIBEGL="$MESA_LIBEGL"
+
+      - name: Build engine + tools + base content (ninja)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          cd ../build
+          # spring + spring-headless: GUI and headless engine binaries.
+          # pr-downloader_cli: the standalone downloader CLI (ExaDev fork, built
+          #   straight from the main tree via add_subdirectory(tools)).
+          # basecontent: the four engine-built .sdz archives.
+          ninja -j$(sysctl -n hw.ncpu) spring spring-headless pr-downloader_cli basecontent
+          ls -la spring spring-headless 2>&1 | head -10
+          file ./tools/pr-downloader/src/pr-downloader
+
+      - name: Smoke test engine binary
+        working-directory: build
+        run: |
+          file ./spring
+          otool -L ./spring | head -20
+          ./spring --help 2>&1 | head -20 || true
+
+      - name: Stage engine artifact
+        # Assemble the flat engine tree bar-lobby unpacks into
+        # buildResources/engine-macos/ before electron-builder runs:
+        #   bin/{spring,spring-headless,pr-downloader}
+        #   lib/                                  Mesa + Vulkan + engine dylibs
+        #   share/vulkan/icd.d/kosmickrisp.json
+        #   game/fonts/FreeSansBold.otf
+        #   game/games/{springcontent,bitmaps,maphelper,cursors}.sdz
+        #
+        # rpath model: a single @rpath. Every dylib's id and every dylib->dylib
+        # and binary->dylib dependency is rewritten to @rpath/<base>; each
+        # binary then carries one LC_RPATH of @executable_path/lib. Because the
+        # bar-lobby version dir is flat (binaries at the root, lib/ a sibling),
+        # @executable_path/lib resolves the whole peer set regardless of which
+        # binary loads which dylib.
+        #
+        # Everything is ad-hoc signed (codesign --force -s -); macOS 26 SIGKILLs
+        # any loaded Mach-O without at least an ad-hoc signature. No Developer
+        # ID, no keychain, no notarisation.
+        working-directory: build
+        run: |
+          set -euo pipefail
+          STAGING="$RUNNER_TEMP/engine-macos-staging"
+          rm -rf "$STAGING"
+          mkdir -p "$STAGING/bin" "$STAGING/lib" \
+                   "$STAGING/share/vulkan/icd.d" \
+                   "$STAGING/game/fonts" "$STAGING/game/games"
+          LIBDIR="$STAGING/lib"
+          RP="@rpath"
+
+          # ---- Binaries ----
+          cp -f ./spring                              "$STAGING/bin/spring"
+          cp -f ./spring-headless                     "$STAGING/bin/spring-headless"
+          cp -f ./tools/pr-downloader/src/pr-downloader "$STAGING/bin/pr-downloader"
+          chmod u+w "$STAGING/bin/"*
+          chmod +x  "$STAGING/bin/"*
+
+          # ---- Recursive dylib collector ----
+          # Copy a dylib into lib/, set its id to @rpath/<base>, and rewrite each
+          # of its own Homebrew deps to @rpath/<base>, recursing.
+          process_dylib() {
+            local src="$1" base dest dep dep_base
+            base="$(basename "$src")"; dest="$LIBDIR/$base"
+            [ -f "$dest" ] && return
+            cp -f "$src" "$dest"; chmod u+w "$dest"
+            install_name_tool -id "$RP/$base" "$dest" 2>/dev/null || true
+            for dep in $(otool -L "$dest" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"
+                dep_base="$(basename "$dep")"
+                install_name_tool -change "$dep" "$RP/$dep_base" "$dest" 2>/dev/null || true
+              fi
+            done
+          }
+
+          # ---- Engine-built dylibs (if any sit next to the binaries) ----
+          if [ -d ./lib ]; then
+            for dy in ./lib/*.dylib; do
+              [ -e "$dy" ] || continue
+              [ -L "$dy" ] && continue
+              process_dylib "$dy"
+            done
+          fi
+
+          # ---- Mesa lib stack from Homebrew (Zink + KosmicKrisp need it) ----
+          MESA_PREFIX="$(brew --prefix mesa)"
+          for dy in "$MESA_PREFIX/lib/"lib*.dylib; do
+            [ -e "$dy" ] || continue
+            [ -L "$dy" ] && continue
+            process_dylib "$dy"
+          done
+
+          # ---- Vulkan loader (Zink dlopens libvulkan.1.dylib by name) ----
+          LOADER="$(brew --prefix vulkan-loader)/lib/libvulkan.1.dylib"
+          if [ -f "$LOADER" ]; then
+            cp -L -f "$LOADER" "$LIBDIR/libvulkan.1.dylib"; chmod u+w "$LIBDIR/libvulkan.1.dylib"
+            install_name_tool -id "$RP/libvulkan.1.dylib" "$LIBDIR/libvulkan.1.dylib"
+            ln -sf libvulkan.1.dylib "$LIBDIR/libvulkan.dylib"
+            for dep in $(otool -L "$LIBDIR/libvulkan.1.dylib" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+              [ -f "$dep" ] && { process_dylib "$dep"; install_name_tool -change "$dep" "$RP/$(basename "$dep")" "$LIBDIR/libvulkan.1.dylib"; }
+            done
+          fi
+
+          # ---- KosmicKrisp ICD (the GPU driver, if brew's Mesa ships it) ----
+          if [ -f "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib" ]; then
+            process_dylib "$MESA_PREFIX/lib/libvulkan_kosmickrisp.dylib"
+          fi
+
+          # ---- Rewrite each binary's deps to @rpath and add one rpath ----
+          for binary in "$STAGING/bin/spring" "$STAGING/bin/spring-headless" "$STAGING/bin/pr-downloader"; do
+            for dep in $(otool -L "$binary" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"
+                install_name_tool -change "$dep" "$RP/$(basename "$dep")" "$binary" 2>/dev/null || true
+              fi
+            done
+            # Drop every build-host rpath, add the single flat-layout rpath.
+            while IFS= read -r rp; do
+              install_name_tool -delete_rpath "$rp" "$binary" 2>/dev/null || true
+            done < <(otool -l "$binary" | awk '/LC_RPATH/{f=1} f&&/path /{print $2; f=0}' | grep '/opt/homebrew')
+            install_name_tool -add_rpath "@executable_path/lib" "$binary" 2>/dev/null || true
+          done
+
+          # ---- Vulkan ICD manifest ----
+          # library_path relative to the manifest: icd.d/ -> vulkan/ -> share/ ->
+          # version-root -> lib/, i.e. ../../../lib/<dylib>.
+          printf '%s\n' '{' '  "file_format_version": "1.0.1",' '  "ICD": {' \
+            '    "library_path": "../../../lib/libvulkan_kosmickrisp.dylib",' \
+            '    "api_version": "1.3.353"' '  }' '}' \
+            > "$STAGING/share/vulkan/icd.d/kosmickrisp.json"
+
+          # ---- Base content (authoritative cmake output paths) ----
+          # springcontent/maphelper/cursors under build/base/; bitmaps under
+          # build/base/spring/ (create_base_content_archive's outputdir arg is
+          # "base/spring" for bitmaps, "base" for the rest).
+          cp -f ./base/springcontent.sdz  "$STAGING/game/games/springcontent.sdz"
+          cp -f ./base/spring/bitmaps.sdz "$STAGING/game/games/bitmaps.sdz"
+          cp -f ./base/maphelper.sdz      "$STAGING/game/games/maphelper.sdz"
+          cp -f ./base/cursors.sdz        "$STAGING/game/games/cursors.sdz"
+
+          # ---- Font (ships in the engine source tree) ----
+          cp -f ../src/cont/fonts/FreeSansBold.otf "$STAGING/game/fonts/FreeSansBold.otf"
+
+          # ---- Ad-hoc sign every Mach-O ----
+          find "$LIBDIR" -name '*.dylib' -type f -print0 | xargs -0 codesign --force -s -
+          codesign --force -s - "$STAGING/bin/spring"
+          codesign --force -s - "$STAGING/bin/spring-headless"
+          codesign --force -s - "$STAGING/bin/pr-downloader"
+
+          # ---- Guard: no absolute build-host paths may survive in any binary ----
+          FAIL=0
+          for binary in "$STAGING/bin/spring" "$STAGING/bin/spring-headless" "$STAGING/bin/pr-downloader"; do
+            if otool -L "$binary" | grep -q '/opt/homebrew/'; then
+              echo "::error::$binary has unrewritten /opt/homebrew paths"
+              otool -L "$binary" | grep '/opt/homebrew/'
+              FAIL=1
+            fi
+          done
+          while IFS= read -r dy; do
+            if otool -L "$dy" | grep -q '/opt/homebrew/'; then
+              echo "::error::$dy has unrewritten /opt/homebrew paths"
+              otool -L "$dy" | grep '/opt/homebrew/'
+              FAIL=1
+            fi
+          done < <(find "$LIBDIR" -name '*.dylib' -type f)
+          [ "$FAIL" -eq 0 ] || exit 1
+
+          # ---- Verify the required tree, then pack ----
+          for required in bin/spring bin/spring-headless bin/pr-downloader \
+                          share/vulkan/icd.d/kosmickrisp.json \
+                          game/fonts/FreeSansBold.otf \
+                          game/games/springcontent.sdz game/games/bitmaps.sdz \
+                          game/games/maphelper.sdz game/games/cursors.sdz; do
+            [ -e "$STAGING/$required" ] || { echo "::error::missing $required"; exit 1; }
+          done
+
+          ENGINE_SHA="${GITHUB_SHA}"
+          TARBALL="$RUNNER_TEMP/engine-macos-arm64-${ENGINE_SHA}.tar.gz"
+          tar -czf "$TARBALL" -C "$STAGING" .
+          echo "ENGINE_TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          ls -lah "$TARBALL"
+          echo "--- Artifact structure ---"
+          tar -tzf "$TARBALL" | sort | head -40
+
+      - name: Upload engine artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-macos-arm64
+          path: ${{ env.ENGINE_TARBALL }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0  # already gzip-compressed
