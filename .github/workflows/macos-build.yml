@@ -27,8 +27,10 @@ on:
       - master
   push:
     branches:
+      # macos-port is built by macos-build-gpu.yml (the KosmicKrisp artifact
+      # bar-lobby consumes); this compat/llvmpipe build stays on master only to
+      # avoid double-building macOS on every macos-port push.
       - master
-      - macos-port
 
 permissions:
   contents: read

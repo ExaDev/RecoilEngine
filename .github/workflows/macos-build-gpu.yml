@@ -26,10 +26,14 @@ name: Build macOS Engine (GPU / Mesa 26.2 KosmicKrisp)
 # pr-downloader. Only engine-built base content + the engine binaries ship.
 
 on:
-  # Manual only: the from-source Mesa 26.2 + LLVM 19 toolchain build is heavy,
-  # so it is not run on every push to the consolidated branch. Trigger it when
-  # a GPU artifact is wanted. The compat build (macos-build.yml) runs on push.
   workflow_dispatch:
+  # bar-lobby consumes THIS build's artifact (the KosmicKrisp GPU engine), so it
+  # must run on macos-port pushes, not just manually. The heavy Mesa 26.2 + LLVM
+  # 19 toolchain is cached (key mesa262-kk-llvm19-*), so after the first run a
+  # push rebuilds only the engine, not the toolchain.
+  push:
+    branches:
+      - macos-port
 
 permissions:
   contents: read
@@ -320,6 +324,7 @@ jobs:
           # ---- Verify the required tree, then pack ----
           for required in bin/spring bin/spring-headless bin/pr-downloader \
                           share/vulkan/icd.d/kosmickrisp.json \
+                          lib/libvulkan_kosmickrisp.dylib \
                           game/fonts/FreeSansBold.otf \
                           game/games/springcontent.sdz game/games/bitmaps.sdz \
                           game/games/maphelper.sdz game/games/cursors.sdz; do
