@@ -28,11 +28,11 @@ include(UtilVersion)
 fetch_spring_version(${SOURCE_ROOT} SPRING_ENGINE)
 
 # Version pin override.
-# This branch is the 2026.06.08 release tag plus a set of sim-neutral macOS
+# This branch is the 2025.06.24 release tag plus a set of sim-neutral macOS
 # platform commits (rendering, threading stubs, CMake, AppleClang shims). Because
 # HEAD sits past the tag, git-describe yields a development string such as
-# "2026.06.08-27-g<sha> <branch>", which would make the engine report a dev
-# version. The simulation is unchanged from 2026.06.08, so the reported engine
+# "2025.06.24-NN-g<sha> <branch>", which would make the engine report a dev
+# version. The simulation is unchanged from 2025.06.24, so the reported engine
 # version must remain exactly that tag. If a PINNED_VERSION file exists at the
 # source root and contains a valid release version, it takes precedence over the
 # git-describe result.
