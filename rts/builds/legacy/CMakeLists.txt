@@ -112,6 +112,9 @@ include_directories(${engineIncludes})
 add_executable(engine-legacy ${EXE_FLAGS} ${engineSources} ${ENGINE_ICON} ${engineHeaders})
 target_link_libraries(engine-legacy ${engineLibraries} Game)
 
+# Export symbols for plugin/AI access (replaces CMP0065 OLD behavior)
+set_target_properties(engine-legacy PROPERTIES ENABLE_EXPORTS TRUE)
+
 # Suppress "ignoring duplicate libraries" linker warning on macOS.
 # Static library transitive deps (engineSim, pr-downloader, sound, etc.) propagate
 # dependencies that are already in engineLibraries, causing benign duplicates.

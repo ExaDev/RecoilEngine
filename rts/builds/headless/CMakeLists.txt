@@ -88,6 +88,9 @@ if(APPLE)
 	target_link_libraries(engine-headless ${engineCommonLibraries})
 endif()
 
+# Export symbols for plugin/AI access (replaces CMP0065 OLD behavior)
+set_target_properties(engine-headless PROPERTIES ENABLE_EXPORTS TRUE)
+
 if    (MINGW)
 	# To enable console output/force a console window to open
 	set_target_properties(engine-headless PROPERTIES LINK_FLAGS "-Wl,-subsystem,console")
