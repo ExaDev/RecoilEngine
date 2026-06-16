@@ -1,0 +1,498 @@
+name: Build macOS Engine (GPU / Mesa 26.2 KosmicKrisp)
+
+# macOS 26 (Apple Silicon) build that renders on the GPU via
+# Mesa 26.2 Zink -> KosmicKrisp -> Metal, instead of the llvmpipe
+# software path used by macos-build.yml.
+#
+# Verified end-to-end on an M2 Max / macOS 26.1: the engine reports
+#   GL renderer : zink Vulkan 1.3 (Apple M2 Max (MESA_KOSMICKRISP))
+#   GL version  : 4.6 (Compatibility Profile) Mesa 26.2.0-devel
+#
+# GPU rendering needs Mesa 26.2's KosmicKrisp (it exposes the
+# VK_EXT_robustness2 nullDescriptor that Zink requires; 26.1.2 does not).
+# brew only ships 26.1.2, and brew's LLVM 22 cannot link Mesa's mandatory
+# KosmicKrisp CLC step (its static clang libs are incomplete and the
+# per-target CGBuiltin split landed in LLVM 20). So this job builds a
+# matched LLVM-19 toolchain from source: llvm@19 + SPIRV-LLVM-Translator
+# v19.1.7 + Mesa main (26.2-devel, pinned). The result is cached.
+#
+# KosmicKrisp requires Metal 4 (macOS 26+); there is no pre-26 GPU path,
+# so that case keeps the llvmpipe build from macos-build.yml.
+#
+# This job produces the engine artifact bar-lobby consumes: a flat tree
+# (bin/ lib/ share/ game/) packed as engine-macos-arm64-<sha>.tar.gz.
+# It does NOT ship a .app or DMG, and it does NOT bundle downloadable game
+# content (BAR / Chobby): bar-lobby fetches that at runtime via
+# pr-downloader. Only engine-built base content + the engine binaries ship.
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_branch:
+        description: 'Engine source branch to build'
+        required: false
+        default: 'macos-2026.06.08'
+      engine_version:
+        description: 'Version string embedded in the release tag (e.g. 2026.06.08)'
+        required: false
+        default: '2026.06.08'
+  # bar-lobby consumes THIS build's KosmicKrisp GPU engine, published as a
+  # GitHub Release asset, so it runs on every push to main (the fork's
+  # canonical branch). The heavy Mesa 26.2 + LLVM 19 toolchain is cached
+  # (key mesa262-kk-llvm19-*), so after the first run a push rebuilds only
+  # the engine, not the toolchain.
+  # Only the pinned macos-<version> branches produce shippable engines, so only
+  # they trigger a build. A push to main (e.g. the daily upstream-sync merge)
+  # does NOT rebuild a pinned engine, whose source is unchanged by it.
+  push:
+    branches:
+      - 'macos-*'
+
+# contents: write is needed to publish the engine artifact as a Release.
+permissions:
+  contents: write
+
+env:
+  # Pinned Mesa main commit verified to render BAR on KosmicKrisp.
+  MESA_COMMIT: "8f272b1fe1"
+  SPIRV_XLAT_TAG: "v19.1.7"
+  BUILD_TYPE: RELWITHDEBINFO
+  # ENGINE_BRANCH / ENGINE_VERSION are resolved per-event by the first step:
+  # workflow_dispatch uses the inputs; a push builds the pushed macos-<version>
+  # branch (version derived by stripping the macos- prefix).
+
+jobs:
+  build-macos-gpu:
+    name: Build macOS arm64 engine (GPU)
+    runs-on: macos-26
+    outputs:
+      engine_tag: ${{ steps.publish.outputs.tag }}
+
+    steps:
+      - name: Resolve engine branch and version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BR="${{ github.event.inputs.engine_branch }}"
+            VER="${{ github.event.inputs.engine_version }}"
+          else
+            # push to a pinned macos-<version> branch: build that exact branch.
+            BR="${{ github.ref_name }}"
+            VER="${BR#macos-}"
+          fi
+          if [ -z "$BR" ] || [ -z "$VER" ]; then
+            echo "::error::could not resolve engine branch/version (event=${{ github.event_name }}, ref=${{ github.ref_name }})"
+            exit 1
+          fi
+          echo "ENGINE_BRANCH=$BR" >> "$GITHUB_ENV"
+          echo "ENGINE_VERSION=$VER" >> "$GITHUB_ENV"
+          echo "Building engine branch '$BR' as version '$VER'"
+
+      - name: Checkout engine
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.ENGINE_BRANCH }}
+          fetch-depth: 0
+          submodules: recursive
+          path: src
+
+      - name: Toolchain + OS
+        run: |
+          sw_vers
+          uname -a
+          clang++ --version | head -1
+
+      - name: Install Homebrew dependencies
+        run: |
+          brew update
+          # p7zip provides the 7z used by the cmake `basecontent` target; cmake
+          # `find_package(SevenZip REQUIRED)` fails to configure without it.
+          brew install \
+            sdl2 libpng libjpeg-turbo libogg libvorbis freetype glm libomp \
+            vulkan-headers vulkan-loader molten-vk devil ninja ccache \
+            meson pkg-config bison flex llvm@19 libclc glslang spirv-tools \
+            p7zip openal-soft
+
+      # ccache turns the per-run full recompile into an incremental one: only
+      # TUs whose preprocessed content changed are recompiled, the rest are
+      # served from cache. The runner is ephemeral, so the cache only persists
+      # via actions/cache. Keyed on a unique run id with a prefix restore-key,
+      # so every run restores the most recent cache and saves an updated one.
+      - name: Restore ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          key: ccache-gpu-${{ env.ENGINE_BRANCH }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-gpu-${{ env.ENGINE_BRANCH }}-
+            ccache-gpu-
+
+      - name: Configure ccache
+        run: |
+          export CCACHE_DIR="$HOME/.ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
+          ccache --set-config=max_size=5G
+          ccache --set-config=compression=true
+          # GH runners rewrite checkout mtimes every run and bake absolute paths
+          # into __FILE__/__DATE__/__TIME__; relax those so the hash stays
+          # content-stable across runs. base_dir rewrites workspace-absolute
+          # paths to relative so cache entries hit despite the changing prefix.
+          ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+          ccache --set-config=compiler_check=content
+          ccache --set-config=base_dir="$GITHUB_WORKSPACE"
+          ccache --zero-stats
+          ccache --show-config | grep -E 'max_size|compression|sloppiness|compiler_check|base_dir|cache_dir' || true
+
+      - name: Cache from-source Mesa 26.2 toolchain
+        id: cache-mesa
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/mesa-native
+            ~/spirv-xlat-install
+          key: mesa262-kk-llvm19-${{ env.MESA_COMMIT }}-${{ env.SPIRV_XLAT_TAG }}-v1
+
+      - name: Build matched LLVM-19 toolchain + Mesa 26.2 (KosmicKrisp)
+        if: steps.cache-mesa.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          L19="$(brew --prefix llvm@19)"
+
+          # (1) SPIRV-LLVM-Translator matched to LLVM 19 (brew ships v22).
+          if [ ! -f "$HOME/spirv-xlat-install/lib/pkgconfig/LLVMSPIRVLib.pc" ]; then
+            rm -rf "$HOME/spirv-xlat"
+            git clone --depth 1 --branch "$SPIRV_XLAT_TAG" \
+              https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git "$HOME/spirv-xlat"
+            cmake -S "$HOME/spirv-xlat" -B "$HOME/spirv-xlat/build" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$HOME/spirv-xlat-install" \
+              -DLLVM_DIR="$L19/lib/cmake/llvm" \
+              -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+              -DCMAKE_EXE_LINKER_FLAGS="-Wl,-lto_library,$L19/lib/libLTO.dylib -L/opt/homebrew/lib" \
+              -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-lto_library,$L19/lib/libLTO.dylib -L/opt/homebrew/lib"
+            ninja -C "$HOME/spirv-xlat/build" install
+          fi
+
+          # (2) Mesa 26.2-devel with the KosmicKrisp Vulkan driver. Shallow
+          # clone of main (gitlab.freedesktop.org will not serve an arbitrary
+          # SHA via fetch); main is 26.2-devel and carries KosmicKrisp's
+          # native nullDescriptor support. Bump MESA_COMMIT to bust the cache.
+          rm -rf "$HOME/mesa-src"
+          git clone --depth 1 https://gitlab.freedesktop.org/mesa/mesa.git "$HOME/mesa-src"
+          echo "mesa commit: $(git -C "$HOME/mesa-src" rev-parse HEAD)  version: $(cat "$HOME/mesa-src/VERSION")"
+
+          python3 -m venv "$HOME/mesa-venv"
+          "$HOME/mesa-venv/bin/pip" install --quiet mako pyyaml packaging
+
+          # Force plain Apple clang (avoids any compiler-launcher wrapper) and
+          # point the linker at LLVM 19's libLTO (Apple ld's libLTO cannot
+          # parse newer bitcode). -L/opt/homebrew/lib resolves bare -lzstd etc.
+          cat > /tmp/plain-native.ini <<INI
+          [binaries]
+          c = '/usr/bin/clang'
+          cpp = '/usr/bin/clang++'
+          objc = '/usr/bin/clang'
+          objcpp = '/usr/bin/clang++'
+
+          [built-in options]
+          c_link_args = ['-Wl,-lto_library,$L19/lib/libLTO.dylib','-L/opt/homebrew/lib']
+          cpp_link_args = ['-Wl,-lto_library,$L19/lib/libLTO.dylib','-L/opt/homebrew/lib']
+          objc_link_args = ['-Wl,-lto_library,$L19/lib/libLTO.dylib','-L/opt/homebrew/lib']
+          objcpp_link_args = ['-Wl,-lto_library,$L19/lib/libLTO.dylib','-L/opt/homebrew/lib']
+          INI
+
+          cd "$HOME/mesa-src"
+          source "$HOME/mesa-venv/bin/activate"
+          export PATH="$L19/bin:$HOME/mesa-venv/bin:/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:$PATH"
+          export LIBRARY_PATH="/opt/homebrew/lib"
+          meson setup build-native --native-file /tmp/plain-native.ini \
+            --pkg-config-path "$HOME/spirv-xlat-install/lib/pkgconfig" \
+            -Dprefix="$HOME/mesa-native" -Dplatforms=macos \
+            -Degl-native-platform=surfaceless -Degl=enabled -Dglx=disabled \
+            -Dgallium-drivers=zink -Dvulkan-drivers=kosmickrisp \
+            -Dmoltenvk-dir=/opt/homebrew/opt/molten-vk \
+            -Dllvm=enabled -Dshared-llvm=disabled -Dbuildtype=release
+          ninja -C build-native install
+          test -f "$HOME/mesa-native/lib/libEGL.dylib"
+          test -f "$HOME/mesa-native/lib/libvulkan_kosmickrisp.dylib"
+          echo "Mesa 26.2 + KosmicKrisp built:"
+          ls "$HOME/mesa-native/lib"/*.dylib
+
+      - name: Configure engine (cmake, Mesa 26.2 libEGL, openal-soft)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          MESA_LIBEGL="$HOME/mesa-native/lib/libEGL.dylib"
+          test -f "$MESA_LIBEGL"
+          # EGL/GL headers come from the from-source Mesa 26.2 (no brew mesa).
+          export CPATH="$HOME/mesa-native/include${CPATH:+:$CPATH}"
+          OPENAL_PREFIX="$(brew --prefix openal-soft)"
+          # openal-soft ships its headers under <prefix>/include/AL and its
+          # library as <prefix>/lib/libopenal.dylib. Point cmake directly at
+          # these so it does not fall back to the system OpenAL.framework.
+          OPENAL_LIB="$OPENAL_PREFIX/lib/libopenal.dylib"
+          OPENAL_INC="$OPENAL_PREFIX/include"
+          test -f "$OPENAL_LIB"
+          mkdir -p ../build
+          cmake --fresh -S . -B ../build -G Ninja \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DAI_TYPES=NONE -DUSERDOCS_PLAIN=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OBJC_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache \
+            -DSPRING_MAC_LIBEGL="$MESA_LIBEGL" \
+            -DOPENAL_LIBRARY="$OPENAL_LIB" \
+            -DOPENAL_INCLUDE_DIR="$OPENAL_INC"
+
+      - name: Build engine + tools + base content (ninja)
+        run: |
+          set -euo pipefail
+          export CPATH="$HOME/mesa-native/include${CPATH:+:$CPATH}"
+          cd build
+          # spring + spring-headless: the GUI and headless engine binaries
+          #   (bar-lobby runs spring-headless for map-checksum calculation).
+          # pr-downloader_cli: the standalone downloader CLI (the ExaDev fork,
+          #   built straight from the main tree via add_subdirectory(tools)).
+          # basecontent: the four engine-built .sdz archives.
+          ninja -j$(sysctl -n hw.ncpu) spring spring-headless pr-downloader_cli basecontent
+          file ./spring
+          file ./spring-headless
+          file ./tools/pr-downloader/src/pr-downloader
+          # ccache effectiveness for this run (hit rate climbs once seeded).
+          ccache --show-stats --verbose 2>/dev/null || ccache -s || true
+
+      - name: Stage engine artifact
+        # Assemble the flat engine tree bar-lobby unpacks into
+        # buildResources/engine-macos/ before electron-builder runs:
+        #   bin/{spring,spring-headless,pr-downloader}
+        #   lib/                                  Mesa 26.2 + Vulkan + engine dylibs
+        #   share/vulkan/icd.d/kosmickrisp.json
+        #   game/fonts/FreeSansBold.otf
+        #   game/games/{springcontent,bitmaps,maphelper,cursors}.sdz
+        #
+        # rpath model: a single @rpath. Every dylib's id and every dylib->dylib
+        # and binary->dylib dependency is rewritten to @rpath/<base>; each
+        # binary then carries one LC_RPATH of @executable_path/lib. Because the
+        # bar-lobby version dir is flat (binaries at the root, lib/ a sibling),
+        # @executable_path/lib resolves the whole peer set regardless of which
+        # binary loads which dylib -- which a per-binary @executable_path/../lib
+        # prefix on the dylibs would not (dylib->dylib deps would break).
+        #
+        # Everything is ad-hoc signed (codesign --force -s -); macOS 26 SIGKILLs
+        # any loaded Mach-O without at least an ad-hoc signature. No Developer
+        # ID, no keychain, no notarisation.
+        run: |
+          set -euo pipefail
+          STAGING="$RUNNER_TEMP/engine-macos-staging"
+          rm -rf "$STAGING"
+          mkdir -p "$STAGING/bin" "$STAGING/lib" \
+                   "$STAGING/share/vulkan/icd.d" \
+                   "$STAGING/game/fonts" "$STAGING/game/games"
+          LIBDIR="$STAGING/lib"
+          RP="@rpath"
+
+          # ---- Binaries ----
+          cp -f build/spring                              "$STAGING/bin/spring"
+          cp -f build/spring-headless                     "$STAGING/bin/spring-headless"
+          cp -f build/tools/pr-downloader/src/pr-downloader "$STAGING/bin/pr-downloader"
+          chmod u+w "$STAGING/bin/"*
+          chmod +x  "$STAGING/bin/"*
+
+          # ---- Recursive dylib collector ----
+          # Copy a dylib into lib/, set its id to @rpath/<base>, and rewrite each
+          # of its own Homebrew / mesa-native deps to @rpath/<base>, recursing.
+          process_dylib() {
+            local src="$1" base dest dep dep_base
+            base="$(basename "$src")"; dest="$LIBDIR/$base"
+            [ -f "$dest" ] && return
+            cp -f "$src" "$dest"; chmod u+w "$dest"
+            install_name_tool -id "$RP/$base" "$dest" 2>/dev/null || true
+            for dep in $(otool -L "$dest" | grep -oE '(/opt/homebrew/[^ ]+|'"$HOME"'/mesa-native/lib/[^ ]+)\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"
+                dep_base="$(basename "$dep")"
+                install_name_tool -change "$dep" "$RP/$dep_base" "$dest" 2>/dev/null || true
+              fi
+            done
+          }
+
+          # ---- Engine-built dylibs (if any sit next to the binaries) ----
+          if [ -d build/lib ]; then
+            for dy in build/lib/*.dylib; do
+              [ -e "$dy" ] || continue
+              [ -L "$dy" ] && continue
+              process_dylib "$dy"
+            done
+          fi
+
+          # ---- Mesa 26.2 (KosmicKrisp) lib stack from the from-source build ----
+          for dy in "$HOME/mesa-native/lib/"*.dylib; do
+            [ -L "$dy" ] && continue
+            process_dylib "$dy"
+          done
+          ln -sf libEGL.1.dylib "$LIBDIR/libEGL.dylib" 2>/dev/null || true
+
+          # ---- Vulkan loader (Zink dlopens libvulkan.1.dylib by name) ----
+          LOADER="$(brew --prefix vulkan-loader)/lib/libvulkan.1.dylib"
+          if [ -f "$LOADER" ]; then
+            cp -L -f "$LOADER" "$LIBDIR/libvulkan.1.dylib"; chmod u+w "$LIBDIR/libvulkan.1.dylib"
+            install_name_tool -id "$RP/libvulkan.1.dylib" "$LIBDIR/libvulkan.1.dylib"
+            ln -sf libvulkan.1.dylib "$LIBDIR/libvulkan.dylib"
+            for dep in $(otool -L "$LIBDIR/libvulkan.1.dylib" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+              [ -f "$dep" ] && { process_dylib "$dep"; install_name_tool -change "$dep" "$RP/$(basename "$dep")" "$LIBDIR/libvulkan.1.dylib"; }
+            done
+          fi
+
+          # ---- openal-soft (brew) ----
+          # Bundle libopenal.dylib from brew so spring links @rpath/libopenal.dylib
+          # rather than /System/Library/Frameworks/OpenAL.framework. process_dylib
+          # handles the id rewrite and recurses into its own deps automatically.
+          OPENAL_PREFIX="$(brew --prefix openal-soft)"
+          OPENAL_DYLIB="$OPENAL_PREFIX/lib/libopenal.dylib"
+          if [ -f "$OPENAL_DYLIB" ]; then
+            process_dylib "$OPENAL_DYLIB"
+          else
+            echo "::error::libopenal.dylib not found at $OPENAL_DYLIB"
+            exit 1
+          fi
+
+          # ---- Rewrite each binary's deps to @rpath and add one rpath ----
+          for binary in "$STAGING/bin/spring" "$STAGING/bin/spring-headless" "$STAGING/bin/pr-downloader"; do
+            for dep in $(otool -L "$binary" | grep -oE '(/opt/homebrew/[^ ]+|'"$HOME"'/mesa-native/lib/[^ ]+)\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"
+                install_name_tool -change "$dep" "$RP/$(basename "$dep")" "$binary" 2>/dev/null || true
+              fi
+            done
+            # Drop every build-host rpath, add the single flat-layout rpath.
+            while IFS= read -r rp; do
+              install_name_tool -delete_rpath "$rp" "$binary" 2>/dev/null || true
+            done < <(otool -l "$binary" | awk '/LC_RPATH/{f=1} f&&/path /{print $2; f=0}' | grep -E '/opt/homebrew|mesa-native')
+            install_name_tool -add_rpath "@executable_path/lib" "$binary" 2>/dev/null || true
+          done
+
+          # ---- Vulkan ICD manifest ----
+          # library_path relative to the manifest: icd.d/ -> vulkan/ -> share/ ->
+          # version-root -> lib/, i.e. ../../../lib/<dylib>.
+          printf '%s\n' '{' '  "file_format_version": "1.0.1",' '  "ICD": {' \
+            '    "library_path": "../../../lib/libvulkan_kosmickrisp.dylib",' \
+            '    "api_version": "1.3.353"' '  }' '}' \
+            > "$STAGING/share/vulkan/icd.d/kosmickrisp.json"
+
+          # ---- Base content (authoritative cmake output paths) ----
+          # springcontent/maphelper/cursors are emitted under build/base/;
+          # bitmaps under build/base/spring/ (create_base_content_archive's
+          # outputdir arg is "base/spring" for bitmaps, "base" for the rest).
+          cp -f build/base/springcontent.sdz  "$STAGING/game/games/springcontent.sdz"
+          cp -f build/base/spring/bitmaps.sdz "$STAGING/game/games/bitmaps.sdz"
+          cp -f build/base/maphelper.sdz      "$STAGING/game/games/maphelper.sdz"
+          cp -f build/base/cursors.sdz        "$STAGING/game/games/cursors.sdz"
+
+          # ---- Font (ships in the engine source tree) ----
+          cp -f src/cont/fonts/FreeSansBold.otf "$STAGING/game/fonts/FreeSansBold.otf"
+
+          # ---- Ad-hoc sign every Mach-O ----
+          find "$LIBDIR" -name '*.dylib' -type f -print0 | xargs -0 codesign --force -s -
+          codesign --force -s - "$STAGING/bin/spring"
+          codesign --force -s - "$STAGING/bin/spring-headless"
+          codesign --force -s - "$STAGING/bin/pr-downloader"
+
+          # ---- Guard: no absolute build-host paths may survive in any binary ----
+          FAIL=0
+          for binary in "$STAGING/bin/spring" "$STAGING/bin/spring-headless" "$STAGING/bin/pr-downloader"; do
+            if otool -L "$binary" | grep -qE '/opt/homebrew/|mesa-native'; then
+              echo "::error::$binary has unrewritten absolute dylib paths"
+              otool -L "$binary" | grep -E '/opt/homebrew/|mesa-native'
+              FAIL=1
+            fi
+          done
+          while IFS= read -r dy; do
+            if otool -L "$dy" | grep -qE '/opt/homebrew/|mesa-native'; then
+              echo "::error::$dy has unrewritten absolute dylib paths"
+              otool -L "$dy" | grep -E '/opt/homebrew/|mesa-native'
+              FAIL=1
+            fi
+          done < <(find "$LIBDIR" -name '*.dylib' -type f)
+          [ "$FAIL" -eq 0 ] || exit 1
+
+          # ---- Verify openal-soft bundling: spring must link @rpath/libopenal,
+          #      not the Apple OpenAL.framework ----
+          if ! otool -L "$STAGING/bin/spring" | grep -q '@rpath/libopenal'; then
+            echo "::error::spring does not link @rpath/libopenal.dylib — openal-soft bundling failed"
+            otool -L "$STAGING/bin/spring"
+            exit 1
+          fi
+          if otool -L "$STAGING/bin/spring" | grep -q 'OpenAL.framework'; then
+            echo "::error::spring still links Apple OpenAL.framework — override did not take"
+            otool -L "$STAGING/bin/spring"
+            exit 1
+          fi
+          echo "openal-soft check passed: $(otool -L "$STAGING/bin/spring" | grep -i openal)"
+
+          # ---- Verify the required tree, then pack ----
+          for required in bin/spring bin/spring-headless bin/pr-downloader \
+                          share/vulkan/icd.d/kosmickrisp.json \
+                          lib/libvulkan_kosmickrisp.dylib \
+                          lib/libopenal.dylib \
+                          game/fonts/FreeSansBold.otf \
+                          game/games/springcontent.sdz game/games/bitmaps.sdz \
+                          game/games/maphelper.sdz game/games/cursors.sdz; do
+            [ -e "$STAGING/$required" ] || { echo "::error::missing $required"; exit 1; }
+          done
+
+          # ENGINE_SHA is the tip of the checked-out engine branch (src/), which
+          # may differ from GITHUB_SHA when ENGINE_BRANCH != the push-trigger branch.
+          ENGINE_SHA="$(git -C src rev-parse HEAD)"
+          SHORT_ENGINE_SHA="$(echo "$ENGINE_SHA" | cut -c1-7)"
+          TARBALL="$RUNNER_TEMP/engine-macos-arm64-${ENGINE_VERSION}-g${SHORT_ENGINE_SHA}.tar.gz"
+          tar -czf "$TARBALL" -C "$STAGING" .
+          echo "ENGINE_TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "ENGINE_SHA=$ENGINE_SHA" >> "$GITHUB_ENV"
+          echo "SHORT_ENGINE_SHA=$SHORT_ENGINE_SHA" >> "$GITHUB_ENV"
+          ls -lah "$TARBALL"
+          echo "--- Artifact structure ---"
+          tar -tzf "$TARBALL" | sort | head -40
+
+      - name: Upload engine artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-macos-arm64
+          path: ${{ env.ENGINE_TARBALL }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0  # already gzip-compressed
+
+      # Publish a versioned GitHub Release per push so bar-lobby can consume the
+      # engine as a public release asset (token-free) instead of a cross-repo
+      # artifact (which needs a PAT). Tag is monotonic (run number) + sha.
+      - name: Publish engine release
+        id: publish
+        # Publish on push AND on manual dispatch: dispatched builds target a
+        # specific engine_branch/engine_version and their release is what the
+        # launcher fetches, so a successful dispatch must publish too.
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Tag encodes the engine version (from the source branch) plus the
+          # short SHA of the engine branch tip, so bar-lobby can fetch by version.
+          TAG="engine-macos-arm64-${ENGINE_VERSION}-g${SHORT_ENGINE_SHA}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          NOTES="Self-contained Apple Silicon engine (Mesa 26.2 KosmicKrisp GPU, openal-soft bundled) for bar-lobby. Engine branch: ${ENGINE_BRANCH} @ ${ENGINE_SHA}. Triggered by ${GITHUB_SHA} on ${GITHUB_REF_NAME}."
+          TITLE="macOS arm64 engine ${ENGINE_VERSION} (${SHORT_ENGINE_SHA})"
+          # Idempotent: create the release, or (on a re-run with the same tag)
+          # update its asset instead of failing.
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ENGINE_TARBALL" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$ENGINE_TARBALL" \
+              --repo "$GITHUB_REPOSITORY" --target "$ENGINE_SHA" \
+              --title "$TITLE" --notes "$NOTES" --latest
+          fi
+          # bar-lobby and the Chobby launcher now fetch this engine release
+          # directly at runtime (no pin file), so there is no downstream bump job.

@@ -1,0 +1,117 @@
+name: Onboard new engine version
+
+# Onboard a newly-released upstream engine version onto macOS by rebasing the
+# portable `macos-layer` branch onto the new release tag, then building both GPU
+# variants. This is the automation counterpart to engine-version-watch: when a
+# version BAR runs has no macos-<version> branch, run this with that version.
+#
+# Flow:
+#   1. Rebase macos-layer onto <version-tag> (base auto-detected via merge-base).
+#   2. If the tag ships vendored streflop (old tags), cherry-pick the ARM64
+#      deterministic-FP back-port (#2819). Modern tags use upstream's submodule
+#      streflop and skip this.
+#   3. Push macos-<version> and dispatch GPU + MoltenVK builds (which publish).
+#   4. A clean rebase + cherry-pick is fully automatic; any conflict aborts and
+#      opens an issue with the state for manual resolution (the honest gate --
+#      conflict resolution across a large upstream gap needs a human).
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Engine version (= release tag) to onboard, e.g. 2026.09.01'
+        required: true
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: onboard-${{ github.event.inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  onboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Rebase macos-layer onto the new tag and build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.event.inputs.version }}
+          # Upstream commit "Add ARM64 platform support with deterministic
+          # floating-point (#2819)" -- the streflop NEON back-port. Only applies
+          # where streflop is vendored; skipped on modern submodule-streflop tags.
+          STREFLOP_ARM64_COMMIT: "5ed2647d2d"
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --all --tags --quiet
+
+          open_issue() {
+            local title="$1" body="$2"
+            if ! gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "${title} in:title" --json number --jq 'length' | grep -q '[1-9]'; then
+              gh issue create --repo "$GITHUB_REPOSITORY" --title "${title}" --body "${body}" --label "onboard"
+            else
+              echo "Issue already open: ${title}"
+            fi
+          }
+
+          BRANCH="macos-${VERSION}"
+          echo "Onboarding ${VERSION} -> branch ${BRANCH}"
+
+          if git ls-remote --heads origin "${BRANCH}" | grep -q .; then
+            echo "::error::${BRANCH} already exists; nothing to onboard"
+            exit 1
+          fi
+          if ! git rev-parse -q --verify "refs/tags/${VERSION}" >/dev/null; then
+            echo "::error::tag ${VERSION} not found; fetch it first"; exit 1
+          fi
+
+          # macos-layer's current base = its merge-base with the new tag (the
+          # release tag the layer was last rebased onto).
+          BASE="$(git merge-base macos-layer "${VERSION}")"
+          echo "macos-layer base to replay from: $(git rev-parse --short "$BASE")"
+
+          git checkout -B "${BRANCH}" macos-layer
+          if ! git rebase --onto "${VERSION}" "${BASE}" "${BRANCH}"; then
+            git rebase --abort
+            open_issue "Rebase of macos-layer onto ${VERSION} conflicted." \
+              "Resolve by rebasing macos-layer onto ${VERSION} locally (conflicts scale with the gap between ${VERSION} and the layer's current base)."
+            exit 1
+          fi
+
+          # Streflop: vendored (tree) on old tags, submodule (commit) on modern.
+          # The ARM64 deterministic-FP back-port only applies to vendored streflop.
+          if [ "$(git ls-tree "${VERSION}" rts/lib/streflop 2>/dev/null | awk '{print $2}')" = "tree" ]; then
+            echo " Vendored streflop on ${VERSION}: applying ARM64 back-port #2819"
+            if ! git cherry-pick -x "${STREFLOP_ARM64_COMMIT}"; then
+              git cherry-pick --abort || true
+              open_issue "streflop #2819 cherry-pick conflicted on ${BRANCH}." \
+                "Cherry-pick ${STREFLOP_ARM64_COMMIT} (ARM64 deterministic FP) onto ${BRANCH} manually, then dispatch the GPU+MoltenVK builds."
+              exit 1
+            fi
+          else
+            echo " Submodule streflop on ${VERSION}: ARM64 support is upstream, skipping #2819"
+          fi
+
+          git push origin "${BRANCH}"
+
+          # Dispatch both GPU variants. The push to macos-<version> would also
+          # trigger them, but the GITHUB_TOKEN push does not fire downstream
+          # workflows, so dispatch explicitly with the branch's own version.
+          gh workflow run macos-build-gpu.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f engine_branch="${BRANCH}" -f engine_version="${VERSION}"
+          gh workflow run macos-build-moltenvk.yml --repo "$GITHUB_REPOSITORY" --ref main \
+            -f engine_branch="${BRANCH}" -f engine_version="${VERSION}"
+
+          {
+            echo "## Onboarded ${VERSION}"
+            echo "Pushed \`${BRANCH}\` (macos-layer rebased onto ${VERSION}) and dispatched GPU + MoltenVK builds."
+            echo "On green, add a darwin dropdown entry to BYAR-Chobby \`dist_cfg/config.json\` (engines: [${VERSION}])."
+            echo "If a build fails on old-tag buildability (CMake 4.x policy, RmlUi <cmath>), those are further legacy adapters -- see macos-2025.06.24's history."
+          } >> "$GITHUB_STEP_SUMMARY"

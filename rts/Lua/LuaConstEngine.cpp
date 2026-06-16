@@ -46,6 +46,7 @@
  * @field gameSpeed number Number of simulation gameframes per second
  * @field textColorCodes TextColorCode Table containing keys that represent the color code operations during font rendering
  * @field isHeadless boolean? Whether this is a headless engine build. Not available in synced
+ * @field hasSyncChecksums boolean? Whether the engine was built with sync-check support (i.e. Spring.GetPrevFrameSyncChecksum() returns a meaningful value). Not available in synced
  */
 
 bool LuaConstEngine::PushEntries(lua_State* L)
@@ -59,8 +60,14 @@ bool LuaConstEngine::PushEntries(lua_State* L)
 	LuaPushNamedString(L, "buildFlags"     , SpringVersion::GetAdditional());
 	LuaPushNamedNumber(L, "wordSize", (!CLuaHandle::GetHandleSynced(L))? Platform::NativeWordSize() * 8: 0);
 
-	if (!CLuaHandle::GetHandleSynced(L))
+	if (!CLuaHandle::GetHandleSynced(L)) {
 		LuaPushNamedBool(L, "isHeadless", SpringVersion::IsHeadless());
+#ifdef SYNCCHECK
+		LuaPushNamedBool(L, "hasSyncChecksums", true);
+#else
+		LuaPushNamedBool(L, "hasSyncChecksums", false);
+#endif
+	}
 
 	LuaPushNamedNumber(L, "gameSpeed", GAME_SPEED);
 	LuaPushNamedNumber(L, "maxCustomPaletteID", MAX_CUSTOM_COLORS - 1);

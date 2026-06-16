@@ -1,0 +1,355 @@
+name: Build macOS Engine (pre-26 GPU / Zink + MoltenVK)
+
+# Pre-macOS-26 Apple Silicon GPU build. Renders via Mesa Zink -> MoltenVK ->
+# Metal, the counterpart to macos-build-gpu.yml's Zink -> KosmicKrisp path
+# (KosmicKrisp needs Metal 4 / macOS 26; MoltenVK runs on older Metal, so this
+# covers Sonoma/Sequoia).
+#
+# Zink hard-requires the Vulkan nullDescriptor feature, which MoltenVK lacks.
+# Mesa MR 37115 ("zink: drop the requirement of nullDescriptor") restores the
+# dummy-surface fallback; it is unmerged, so we apply it to the Mesa clone.
+# Proven locally: zink Vulkan 1.4 (Apple M2 Max (MOLTENVK)). MoltenVK is missing
+# logicOp / EXT_custom_border_color, so some rendering may be imperfect.
+#
+# Build is much lighter than the KosmicKrisp one: no matched LLVM-19 / SPIRV
+# translator toolchain (Zink needs neither). Built on macos-15 with a Sonoma
+# deployment target so the binaries run on pre-26.
+#
+# Output: the same flat engine tree (bin/ lib/ share/ game/), published as the
+# "-moltenvk" asset on the same engine-macos-arm64-<version>-g<sha> release the
+# KosmicKrisp build creates, so the launcher can pick the variant by OS version.
+
+on:
+  workflow_dispatch:
+    inputs:
+      engine_branch:
+        description: 'Engine source branch to build'
+        required: false
+        default: 'macos-2026.06.08'
+      engine_version:
+        description: 'Version string embedded in the release tag (e.g. 2026.06.08)'
+        required: false
+        default: '2026.06.08'
+  push:
+    branches:
+      - 'macos-*'
+
+permissions:
+  contents: write
+
+env:
+  ZINK_NULLDESC_MR: "37115"
+  BUILD_TYPE: RELWITHDEBINFO
+  # Binaries must run on pre-26; target Sonoma (the cask floor). Built on macos-15.
+  MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+jobs:
+  build-macos-moltenvk:
+    name: Build macOS arm64 engine (pre-26 / MoltenVK)
+    runs-on: macos-15
+    outputs:
+      engine_tag: ${{ steps.publish.outputs.tag }}
+
+    steps:
+      - name: Resolve engine branch and version
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BR="${{ github.event.inputs.engine_branch }}"
+            VER="${{ github.event.inputs.engine_version }}"
+          else
+            BR="${{ github.ref_name }}"
+            VER="${BR#macos-}"
+          fi
+          if [ -z "$BR" ] || [ -z "$VER" ]; then
+            echo "::error::could not resolve engine branch/version (event=${{ github.event_name }}, ref=${{ github.ref_name }})"
+            exit 1
+          fi
+          echo "ENGINE_BRANCH=$BR" >> "$GITHUB_ENV"
+          echo "ENGINE_VERSION=$VER" >> "$GITHUB_ENV"
+          echo "Building engine branch '$BR' as version '$VER' (MoltenVK / pre-26)"
+
+      - name: Checkout engine
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.ENGINE_BRANCH }}
+          fetch-depth: 0
+          submodules: recursive
+          path: src
+
+      - name: Toolchain + OS
+        run: |
+          sw_vers
+          uname -a
+          clang++ --version | head -1
+
+      - name: Install Homebrew dependencies
+        run: |
+          brew update
+          # No llvm@19/libclc/spirv-tools: Zink (unlike KosmicKrisp) needs none.
+          brew install \
+            sdl2 libpng libjpeg-turbo libogg libvorbis freetype glm libomp \
+            vulkan-headers vulkan-loader molten-vk devil ninja ccache \
+            meson pkg-config bison flex glslang \
+            p7zip openal-soft
+
+      - name: Restore ccache
+        uses: actions/cache@v5
+        with:
+          path: ~/.ccache
+          key: ccache-mvk-${{ env.ENGINE_BRANCH }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-mvk-${{ env.ENGINE_BRANCH }}-
+            ccache-mvk-
+
+      - name: Configure ccache
+        run: |
+          export CCACHE_DIR="$HOME/.ccache"
+          echo "CCACHE_DIR=$CCACHE_DIR" >> "$GITHUB_ENV"
+          ccache --set-config=max_size=5G
+          ccache --set-config=compression=true
+          ccache --set-config=sloppiness=time_macros,include_file_mtime,include_file_ctime,pch_defines
+          ccache --set-config=compiler_check=content
+          ccache --set-config=base_dir="$GITHUB_WORKSPACE"
+          ccache --zero-stats
+
+      - name: Cache Mesa Zink (MR-patched)
+        id: cache-mesa
+        uses: actions/cache@v5
+        with:
+          path: ~/mesa-mvk
+          key: mesa-zink-mvk-mr${{ env.ZINK_NULLDESC_MR }}-v1
+
+      - name: Build Mesa Zink with MR 37115 (drop nullDescriptor requirement)
+        if: steps.cache-mesa.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET}"
+          rm -rf "$HOME/mesa-src"
+          git clone --depth 1 https://gitlab.freedesktop.org/mesa/mesa.git "$HOME/mesa-src"
+          cd "$HOME/mesa-src"
+          echo "mesa $(git rev-parse HEAD)  version $(cat VERSION)"
+
+          # Apply MR 37115 via the GitLab API diff (a shallow merge of the MR ref
+          # fails with 'unrelated histories'). Reconstruct a git patch and apply.
+          python3 - <<'PY'
+          import os,json,urllib.request
+          mr=os.environ["ZINK_NULLDESC_MR"]
+          url=f"https://gitlab.freedesktop.org/api/v4/projects/176/merge_requests/{mr}/diffs?per_page=100"
+          data=json.load(urllib.request.urlopen(url))
+          out=[]
+          for d in data:
+              op,np=d['old_path'],d['new_path']
+              out.append(f"diff --git a/{op} b/{np}")
+              if d.get('new_file'): out.append("new file mode 100644")
+              if d.get('deleted_file'): out.append("deleted file mode 100644")
+              out.append(f"--- {'/dev/null' if d.get('new_file') else 'a/'+op}")
+              out.append(f"+++ {'/dev/null' if d.get('deleted_file') else 'b/'+np}")
+              out.append(d['diff'].rstrip('\n'))
+          open('/tmp/mr.patch','w').write('\n'.join(out)+'\n')
+          print('patch files:',len(data))
+          PY
+          git config user.email ci@local && git config user.name ci
+          git apply --index --whitespace=nowarn /tmp/mr.patch
+          grep -q "Use dummy descriptors even if nullDescriptor" src/gallium/drivers/zink/zink_screen.c \
+            || { echo "::error::MR 37115 did not apply (nullDescriptor fallback absent)"; exit 1; }
+
+          python3 -m venv "$HOME/mesa-venv"
+          "$HOME/mesa-venv/bin/pip" install --quiet meson mako pyyaml packaging
+          export PATH="$HOME/mesa-venv/bin:/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:$PATH"
+
+          meson setup build \
+            -Dgallium-drivers=zink -Dvulkan-drivers= -Dplatforms=macos \
+            -Degl-native-platform=surfaceless -Degl=enabled -Dglx=disabled -Dgbm=disabled \
+            -Dllvm=disabled -Dshared-llvm=disabled \
+            -Dmoltenvk-dir="$(brew --prefix molten-vk)" \
+            -Dprefix="$HOME/mesa-mvk" -Dbuildtype=release
+          ninja -C build install
+          test -f "$HOME/mesa-mvk/lib/libEGL.dylib"
+          echo "Mesa Zink (MoltenVK) built:"; ls "$HOME/mesa-mvk/lib/"*.dylib
+
+      - name: Configure engine (cmake, Zink libEGL, openal-soft)
+        working-directory: src
+        run: |
+          set -euo pipefail
+          MESA_LIBEGL="$HOME/mesa-mvk/lib/libEGL.dylib"
+          test -f "$MESA_LIBEGL"
+          export CPATH="$HOME/mesa-mvk/include${CPATH:+:$CPATH}"
+          OPENAL_PREFIX="$(brew --prefix openal-soft)"
+          OPENAL_LIB="$OPENAL_PREFIX/lib/libopenal.dylib"
+          OPENAL_INC="$OPENAL_PREFIX/include"
+          test -f "$OPENAL_LIB"
+          mkdir -p ../build
+          cmake --fresh -S . -B ../build -G Ninja \
+            -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET}" \
+            -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DCMAKE_C_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG" \
+            -DAI_TYPES=NONE -DUSERDOCS_PLAIN=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OBJC_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_OBJCXX_COMPILER_LAUNCHER=ccache \
+            -DSPRING_MAC_LIBEGL="$MESA_LIBEGL" \
+            -DOPENAL_LIBRARY="$OPENAL_LIB" \
+            -DOPENAL_INCLUDE_DIR="$OPENAL_INC"
+
+      - name: Build engine + tools + base content (ninja)
+        run: |
+          set -euo pipefail
+          export CPATH="$HOME/mesa-mvk/include${CPATH:+:$CPATH}"
+          cd build
+          ninja -j$(sysctl -n hw.ncpu) spring spring-headless pr-downloader_cli basecontent
+          file ./spring
+          ccache --show-stats --verbose 2>/dev/null || ccache -s || true
+
+      - name: Stage engine artifact (MoltenVK)
+        run: |
+          set -euo pipefail
+          STAGING="$RUNNER_TEMP/engine-macos-staging"
+          rm -rf "$STAGING"
+          mkdir -p "$STAGING/bin" "$STAGING/lib" \
+                   "$STAGING/share/vulkan/icd.d" \
+                   "$STAGING/game/fonts" "$STAGING/game/games"
+          LIBDIR="$STAGING/lib"; RP="@rpath"
+
+          cp -f build/spring                              "$STAGING/bin/spring"
+          cp -f build/spring-headless                     "$STAGING/bin/spring-headless"
+          cp -f build/tools/pr-downloader/src/pr-downloader "$STAGING/bin/pr-downloader"
+          chmod u+w "$STAGING/bin/"*; chmod +x "$STAGING/bin/"*
+
+          process_dylib() {
+            local src="$1" base dest dep dep_base
+            base="$(basename "$src")"; dest="$LIBDIR/$base"
+            [ -f "$dest" ] && return
+            cp -f "$src" "$dest"; chmod u+w "$dest"
+            install_name_tool -id "$RP/$base" "$dest" 2>/dev/null || true
+            for dep in $(otool -L "$dest" | grep -oE '(/opt/homebrew/[^ ]+|'"$HOME"'/mesa-mvk/lib/[^ ]+)\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"; dep_base="$(basename "$dep")"
+                install_name_tool -change "$dep" "$RP/$dep_base" "$dest" 2>/dev/null || true
+              fi
+            done
+          }
+
+          if [ -d build/lib ]; then
+            for dy in build/lib/*.dylib; do [ -e "$dy" ] || continue; [ -L "$dy" ] && continue; process_dylib "$dy"; done
+          fi
+
+          # ---- Mesa Zink lib stack ----
+          for dy in "$HOME/mesa-mvk/lib/"*.dylib; do [ -L "$dy" ] && continue; process_dylib "$dy"; done
+          ln -sf libEGL.1.dylib "$LIBDIR/libEGL.dylib" 2>/dev/null || true
+
+          # ---- Vulkan loader (Zink dlopens libvulkan.1.dylib by name) ----
+          LOADER="$(brew --prefix vulkan-loader)/lib/libvulkan.1.dylib"
+          cp -L -f "$LOADER" "$LIBDIR/libvulkan.1.dylib"; chmod u+w "$LIBDIR/libvulkan.1.dylib"
+          install_name_tool -id "$RP/libvulkan.1.dylib" "$LIBDIR/libvulkan.1.dylib"
+          ln -sf libvulkan.1.dylib "$LIBDIR/libvulkan.dylib"
+          for dep in $(otool -L "$LIBDIR/libvulkan.1.dylib" | grep -oE '/opt/homebrew/[^ ]+\.dylib' | sort -u); do
+            [ -f "$dep" ] && { process_dylib "$dep"; install_name_tool -change "$dep" "$RP/$(basename "$dep")" "$LIBDIR/libvulkan.1.dylib"; }
+          done
+
+          # ---- MoltenVK (the Vulkan ICD; Zink renders through it on pre-26) ----
+          MVK="$(brew --prefix molten-vk)/lib/libMoltenVK.dylib"
+          test -f "$MVK" || { echo "::error::libMoltenVK.dylib not found at $MVK"; exit 1; }
+          process_dylib "$MVK"
+
+          # ---- openal-soft ----
+          OPENAL_DYLIB="$(brew --prefix openal-soft)/lib/libopenal.dylib"
+          test -f "$OPENAL_DYLIB" || { echo "::error::libopenal.dylib not found"; exit 1; }
+          process_dylib "$OPENAL_DYLIB"
+
+          # ---- Rewrite binaries' deps + single rpath ----
+          for binary in "$STAGING/bin/spring" "$STAGING/bin/spring-headless" "$STAGING/bin/pr-downloader"; do
+            for dep in $(otool -L "$binary" | grep -oE '(/opt/homebrew/[^ ]+|'"$HOME"'/mesa-mvk/lib/[^ ]+)\.dylib' | sort -u); do
+              if [ -f "$dep" ]; then
+                process_dylib "$dep"
+                install_name_tool -change "$dep" "$RP/$(basename "$dep")" "$binary" 2>/dev/null || true
+              fi
+            done
+            while IFS= read -r rp; do
+              install_name_tool -delete_rpath "$rp" "$binary" 2>/dev/null || true
+            done < <(otool -l "$binary" | awk '/LC_RPATH/{f=1} f&&/path /{print $2; f=0}' | grep -E '/opt/homebrew|mesa-mvk')
+            install_name_tool -add_rpath "@executable_path/lib" "$binary" 2>/dev/null || true
+          done
+
+          # ---- MoltenVK ICD manifest (loader -> MoltenVK) ----
+          printf '%s\n' '{' '  "file_format_version": "1.0.0",' '  "ICD": {' \
+            '    "library_path": "../../../lib/libMoltenVK.dylib",' \
+            '    "api_version": "1.4.0"' '  }' '}' \
+            > "$STAGING/share/vulkan/icd.d/MoltenVK_icd.json"
+
+          # ---- Base content + font ----
+          cp -f build/base/springcontent.sdz  "$STAGING/game/games/springcontent.sdz"
+          cp -f build/base/spring/bitmaps.sdz "$STAGING/game/games/bitmaps.sdz"
+          cp -f build/base/maphelper.sdz      "$STAGING/game/games/maphelper.sdz"
+          cp -f build/base/cursors.sdz        "$STAGING/game/games/cursors.sdz"
+          cp -f src/cont/fonts/FreeSansBold.otf "$STAGING/game/fonts/FreeSansBold.otf"
+
+          # ---- Ad-hoc sign ----
+          find "$LIBDIR" -name '*.dylib' -type f -print0 | xargs -0 codesign --force -s -
+          codesign --force -s - "$STAGING/bin/spring"
+          codesign --force -s - "$STAGING/bin/spring-headless"
+          codesign --force -s - "$STAGING/bin/pr-downloader"
+
+          # ---- Guard: no absolute build-host paths survive ----
+          FAIL=0
+          while IFS= read -r m; do
+            if otool -L "$m" | grep -qE '/opt/homebrew/|mesa-mvk'; then
+              echo "::error::$m has unrewritten absolute dylib paths"; otool -L "$m" | grep -E '/opt/homebrew/|mesa-mvk'; FAIL=1
+            fi
+          done < <(printf '%s\n' "$STAGING/bin/spring" "$STAGING/bin/spring-headless" "$STAGING/bin/pr-downloader"; find "$LIBDIR" -name '*.dylib' -type f)
+          [ "$FAIL" -eq 0 ] || exit 1
+
+          # ---- openal-soft bundled, not Apple framework ----
+          otool -L "$STAGING/bin/spring" | grep -q '@rpath/libopenal' || { echo "::error::spring not linking @rpath/libopenal"; otool -L "$STAGING/bin/spring"; exit 1; }
+          otool -L "$STAGING/bin/spring" | grep -q 'OpenAL.framework' && { echo "::error::spring still links Apple OpenAL.framework"; exit 1; } || true
+
+          for required in bin/spring bin/spring-headless bin/pr-downloader \
+                          share/vulkan/icd.d/MoltenVK_icd.json \
+                          lib/libMoltenVK.dylib lib/libvulkan.1.dylib lib/libopenal.dylib \
+                          game/fonts/FreeSansBold.otf \
+                          game/games/springcontent.sdz game/games/bitmaps.sdz \
+                          game/games/maphelper.sdz game/games/cursors.sdz; do
+            [ -e "$STAGING/$required" ] || { echo "::error::missing $required"; exit 1; }
+          done
+
+          ENGINE_SHA="$(git -C src rev-parse HEAD)"
+          SHORT_ENGINE_SHA="$(echo "$ENGINE_SHA" | cut -c1-7)"
+          TARBALL="$RUNNER_TEMP/engine-macos-arm64-${ENGINE_VERSION}-g${SHORT_ENGINE_SHA}-moltenvk.tar.gz"
+          tar -czf "$TARBALL" -C "$STAGING" .
+          echo "ENGINE_TARBALL=$TARBALL" >> "$GITHUB_ENV"
+          echo "ENGINE_SHA=$ENGINE_SHA" >> "$GITHUB_ENV"
+          echo "SHORT_ENGINE_SHA=$SHORT_ENGINE_SHA" >> "$GITHUB_ENV"
+          ls -lah "$TARBALL"; tar -tzf "$TARBALL" | sort | head -40
+
+      - name: Upload engine artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-macos-arm64-moltenvk
+          path: ${{ env.ENGINE_TARBALL }}
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Publish engine release (moltenvk asset)
+        id: publish
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Same tag as the KosmicKrisp build; add the -moltenvk asset alongside it
+          # so one release per engine version carries both GPU variants.
+          TAG="engine-macos-arm64-${ENGINE_VERSION}-g${SHORT_ENGINE_SHA}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          NOTES="Apple Silicon engine, pre-macOS-26 GPU variant (Mesa Zink -> MoltenVK, openal-soft bundled). Engine branch: ${ENGINE_BRANCH} @ ${ENGINE_SHA}."
+          TITLE="macOS arm64 engine ${ENGINE_VERSION} (${SHORT_ENGINE_SHA})"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ENGINE_TARBALL" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$TAG" "$ENGINE_TARBALL" \
+              --repo "$GITHUB_REPOSITORY" --target "$ENGINE_SHA" \
+              --title "$TITLE" --notes "$NOTES" --latest
+          fi

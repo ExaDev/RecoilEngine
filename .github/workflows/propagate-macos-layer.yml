@@ -1,0 +1,100 @@
+name: Propagate macOS layer to pinned branches
+
+# Cherry-pick a macOS-layer fix onto every pinned macos-<version> branch and
+# rebuild each. The pinned branches are frozen at their engine tag and are not
+# touched by upstream-sync, so layer improvements made elsewhere (typically on
+# main, or on one macos-* branch) reach them only through this workflow.
+#
+# Clean cherry-pick -> push the branch + dispatch its build (which publishes an
+# updated engine-macos-arm64-<version> release). Conflict -> reported for manual
+# resolution, other branches still processed. Idempotent: a commit already
+# present (or previously cherry-picked) is skipped.
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 'Commit (sha or ref) to cherry-pick onto every pinned macos-<version> branch'
+        required: true
+      dry_run:
+        description: 'Test the cherry-pick on each branch without pushing or building'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: propagate-macos-layer
+  cancel-in-progress: false
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Cherry-pick onto each pinned macos-* branch and build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.event.inputs.commit }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git fetch --all --quiet --prune
+          SHA="$(git rev-parse "${COMMIT}^{commit}")"
+          echo "Propagating $SHA ($(git log -1 --format=%s "$SHA"))"
+
+          # Only pinned version branches (macos-<year>.<month>.<day>); the glob
+          # requires a digit after "macos-" so stale branches like macos-port are
+          # excluded.
+          mapfile -t BRANCHES < <(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/macos-[0-9]*' | sed 's#^origin/##')
+          [ "${#BRANCHES[@]}" -gt 0 ] || { echo "::error::no pinned macos-<version> branches found"; exit 1; }
+          echo "Target branches: ${BRANCHES[*]}"
+
+          CLEAN=(); CONFLICT=(); SKIP=()
+          for b in "${BRANCHES[@]}"; do
+            echo "::group::$b"
+            git checkout -B "$b" "origin/$b"
+            # Skip if the branch literally contains the commit, or a prior run
+            # already cherry-picked it (the -x trailer records the source sha).
+            if git merge-base --is-ancestor "$SHA" HEAD 2>/dev/null \
+               || git log --fixed-strings --grep="cherry picked from commit $SHA" -1 --format=%H | grep -q .; then
+              echo "$b already has $SHA, skipping"; SKIP+=("$b"); echo "::endgroup::"; continue
+            fi
+            if git cherry-pick -x "$SHA"; then
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "$b: clean (dry-run, not pushing)"; git reset --hard "origin/$b"
+              else
+                git push origin "$b"
+                # A GITHUB_TOKEN push does not trigger the build's push event, so
+                # dispatch it explicitly with the branch's own version.
+                VER="${b#macos-}"
+                gh workflow run macos-build-gpu.yml --repo "$GITHUB_REPOSITORY" \
+                  --ref main -f engine_branch="$b" -f engine_version="$VER"
+                echo "$b: pushed + build dispatched (version $VER)"
+              fi
+              CLEAN+=("$b")
+            else
+              git cherry-pick --abort
+              echo "::warning::$b: cherry-pick of $SHA conflicts; propagate manually"
+              CONFLICT+=("$b")
+            fi
+            echo "::endgroup::"
+          done
+
+          {
+            echo "## macOS layer propagation"
+            echo "Commit: \`$SHA\`"
+            echo "- Applied: ${CLEAN[*]:-none}"
+            echo "- Skipped (already present): ${SKIP[*]:-none}"
+            echo "- Conflicts (manual): ${CONFLICT[*]:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          [ "${#CONFLICT[@]}" -eq 0 ] || { echo "::error::conflicts on: ${CONFLICT[*]}"; exit 1; }
