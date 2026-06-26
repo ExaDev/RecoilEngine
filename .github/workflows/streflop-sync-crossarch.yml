@@ -11,7 +11,9 @@ name: STREFLOP Cross-Arch Sync
 
 on:
     push:
-        branches: [main]
+        # main gates the layer + upstream head; macos-* gates the pinned,
+        # shipping engine branches at their frozen streflop version.
+        branches: [main, "macos-*"]
         paths:
             - "tools/sync-test/**"
             - "rts/lib/streflop/**"
